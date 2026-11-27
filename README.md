@@ -3,6 +3,8 @@
 Gather, sell, build and hold the keep. A low-poly 3D wave-defense game for the
 browser, in the carry-and-build style of mobile base-builder ads. No ads.
 
+**[▶ Play it in your browser](https://granterickson.github.io/HearthHold/)**
+
 The full design is in [SPEC.md](SPEC.md).
 
 ## Run it
@@ -39,18 +41,18 @@ push to `main` builds and deploys the site through GitHub Actions.
 
 ## Project layout
 
-| File | What it does |
-|---|---|
-| `src/config.ts` | All balance numbers: hero, resources, defenses, enemies, wave formulas |
-| `src/pads.ts` | Every build pad: costs, unlock rules, what each purchase does |
-| `src/main.ts` | Boot, game loop, camera |
-| `src/hero.ts` / `src/units.ts` | Hero; enemies, soldiers and workers |
-| `src/structures.ts` | Keep, walls, towers, catapult, market economy, collisions |
-| `src/world.ts` | Ground, scenery, trees / rocks / gold veins |
-| `src/models.ts` | Every 3D model, built from primitives in code |
-| `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save |
-| `src/ui.ts`, `src/style.css`, `index.html` | HUD and menus |
-| `src/debug.ts` | Debug cheats and the autotest bot (see SPEC §17) |
+| File                                             | What it does                                                           |
+| ------------------------------------------------ | ---------------------------------------------------------------------- |
+| `src/config.ts`                                  | All balance numbers: hero, resources, defenses, enemies, wave formulas |
+| `src/pads.ts`                                    | Every build pad: costs, unlock rules, what each purchase does          |
+| `src/main.ts`                                    | Boot, game loop, camera                                                |
+| `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers and workers                                    |
+| `src/structures.ts`                              | Keep, walls, towers, catapult, market economy, collisions              |
+| `src/world.ts`                                   | Ground, scenery, trees / rocks / gold veins                            |
+| `src/models.ts`                                  | Every 3D model, built from primitives in code                          |
+| `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                 |
+| `src/ui.ts`, `src/style.css`, `index.html`       | HUD and menus                                                          |
+| `src/debug.ts`                                   | Debug cheats and the autotest bot (see SPEC §17)                       |
 
 ## Testing
 

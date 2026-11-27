@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Carry, sell, build and defend: a low-poly medieval wave-defense game for the browser.",
+  "homepage": "https://granterickson.github.io/HearthHold/",
   "type": "module",
   "scripts": {
     "dev": "vite",
