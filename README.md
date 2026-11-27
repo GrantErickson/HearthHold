@@ -26,6 +26,11 @@ Cloudflare Pages, an S3 bucket…). Paths are relative, so it also works from a
 sub-folder. The built page has to be served over http(s); opening
 `dist/index.html` straight from disk won't load the module script.
 
+## GitHub Pages
+
+The site is published at <https://granterickson.github.io/HearthHold/>. Every
+push to `main` builds and deploys the site through GitHub Actions.
+
 ## Controls
 
 - **Move:** WASD / arrow keys, or touch and drag anywhere (mouse drag works too).
