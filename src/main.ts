@@ -21,6 +21,8 @@ import { Sfx } from './audio';
 import { on, emit } from './events';
 import { updateAbilities, resetAbilities, type AbilityId } from './abilities';
 import { initHappenings, updateHappenings } from './happenings';
+import { Post } from './post';
+import { updateAllies, alliesInfo } from './allies';
 import { pendingChoices } from './progress';
 import { initDebugKeys, runAutotest, runPreset, jumpTo, refreshDevBar, JUMP_BASES, type JumpBase } from './debug';
 
@@ -43,6 +45,7 @@ function step(dt: number): void {
   World.update(dt, G.time);
   St.updateStructures(dt);
   Units.update(dt);
+  updateAllies(dt);
   Proj.update(dt);
   updatePads(dt);
   Waves.update(dt);
@@ -106,7 +109,7 @@ function frame(now: number): void {
   Sfx.listener.z = hero.z;
   updateTexts(rdt);
   UI.update(rdt, objective);
-  engine.renderer?.render(scene, camera);
+  if (engine.renderer) Post.render(engine.renderer);
 }
 
 /**
@@ -117,7 +120,7 @@ function warmUp(renderer: THREE.WebGLRenderer): void {
   warmFX();
   const g = new THREE.Group();
   const geo = ensureEmit(new THREE.BoxGeometry(0.01, 0.01, 0.01));
-  const mats: THREE.Material[] = [Mat.vc, Mat.foliage, Mat.grass, Mat.unit, Mat.flash, Mat.flashSoft, Mat.chill, Mat.burn, Mat.spirit, Mat.frozen, ...fxSampleMaterials()];
+  const mats: THREE.Material[] = [Mat.vc, Mat.foliage, Mat.grass, Mat.unit, Mat.spirit, Mat.frozen, ...fxSampleMaterials()];
   for (const m of mats) {
     const mesh = new THREE.Mesh(geo, m);
     mesh.castShadow = true;
@@ -144,6 +147,7 @@ function resize(): void {
   engine.w = w;
   engine.h = h;
   engine.renderer?.setSize(w, h);
+  if (engine.renderer) Post.resize(w, h, engine.renderer.getPixelRatio());
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -190,7 +194,7 @@ function enableDebug(): void {
   debugOn = true;
   initDebugKeys();
   window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
-  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine };
+  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine, alliesInfo };
 }
 
 /** Test builds: start at a later wave with a base built from a typical run's income. */
@@ -278,6 +282,7 @@ function boot(): void {
   renderer.shadowMap.type = touch ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
   document.getElementById('game')!.appendChild(renderer.domElement);
   engine.renderer = renderer;
+  if (!params.has('nopost')) Post.init(renderer, touch);
   resize();
   window.addEventListener('resize', resize);
 

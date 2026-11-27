@@ -3,6 +3,7 @@ import { scene } from './engine';
 import { G, actOf } from './state';
 import { U } from './models';
 import { glowTex, softTex } from './fx';
+import { Post } from './post';
 
 /**
  * Lighting, sky colour, day/night, act seasons and weather.
@@ -30,11 +31,11 @@ const DAY: Palette[] = [
   pal(0xa66050, 0xffd8c8, 0x4a2a20, 1.7, 0xffc8a8, 2.1),
 ];
 const NIGHT: Palette[] = [
-  pal(0x1d2b4a, 0x6a80b0, 0x1c2a1c, 1.0, 0xa8bce8, 0.7),
-  pal(0x2a2038, 0x7a6e98, 0x2a2018, 1.0, 0xb8b0e0, 0.65),
-  pal(0x142420, 0x6a8a80, 0x101810, 0.95, 0xa8c8bc, 0.55),
-  pal(0x1a2a48, 0x8aa4d8, 0x3a4a6a, 1.1, 0xc0d4f4, 0.85),
-  pal(0x2a0d10, 0x8a5a56, 0x200a08, 1.0, 0xd89a88, 0.6),
+  pal(0x1d2b4a, 0x7088c0, 0x223222, 1.2, 0xb0c4f0, 0.85),
+  pal(0x2a2038, 0x8476a8, 0x30261c, 1.2, 0xc0b8e8, 0.8),
+  pal(0x142420, 0x78988c, 0x142016, 1.15, 0xb0d0c4, 0.7),
+  pal(0x1a2a48, 0x90aae0, 0x3e4e70, 1.25, 0xc8daf8, 0.95),
+  pal(0x2a0d10, 0x986460, 0x260c0a, 1.2, 0xe0a490, 0.75),
 ];
 const BLOOD = pal(0x3a0a0e, 0xa86060, 0x2a0808, 1.0, 0xe08070, 0.75);
 
@@ -259,6 +260,8 @@ export const Env = {
     night += Math.sign(target - night) * Math.min(Math.abs(target - night), dt / 3.5);
     Env.night = night;
     U.uNight.value = night;
+    U.uRim.value = 0.3 + night * 0.25;
+    Post.setNight(night);
     const k = 1 - Math.exp(-dt * 1.6);
     lerpPal(cur, DAY[act - 1], blood ? BLOOD : NIGHT[act - 1], night, Math.min(1, k * 3));
     (scene.background as THREE.Color).copy(cur.bg);

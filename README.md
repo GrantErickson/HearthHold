@@ -10,7 +10,11 @@ browser, in the carry-and-build style of mobile base-builder ads. No ads.
 - **25+ enemy types**: flyers, wall-phasing wraiths, sappers, healers, summoners,
   siege engines, armored knights, elites with special affixes and wave modifiers.
 - **Deep defenses**: walls with six tiers, archer towers, ballista, frost, mage,
-  fire and holy towers, spike and tar traps, catapult, soldiers and rangers.
+  fire and holy towers, spike and tar traps, catapult, soldiers and rangers —
+  plus **cannon batteries** that out-range siege engines, a **griffin aerie**
+  whose riders hunt enemies anywhere on the field, and a **dragon roost**.
+- **Cartoon look**: rounded models, cel shading, ink outlines, bloom, squash and
+  stretch, puffs of smoke and big cartoon explosions.
 - **Many ways to level up**: hero XP with perk choices, four abilities, boss
   relics, equipment, Academy research, keep levels and repeatable Glory.
 - **Game speed** 1× to 3×, day/night, act seasons and weather.
@@ -60,6 +64,8 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/pads.ts`                                    | Every build pad: costs, unlock rules, what each purchase does             |
 | `src/progress.ts`                                | Derived stats (`Stat`), XP and levels, perk and relic choices             |
 | `src/abilities.ts`                               | Hero abilities                                                            |
+| `src/allies.ts`                                  | Griffin riders and the village dragon                                     |
+| `src/post.ts`                                    | Post-processing: ink outlines and bloom                                   |
 | `src/main.ts`                                    | Boot, game loop (sub-stepped for game speed), camera, keys                |
 | `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers, rangers and workers                              |
 | `src/structures.ts`                              | Keep, walls, towers, special towers, traps, market economy, collisions    |
@@ -67,7 +73,7 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/world.ts`                                   | Ground, grass, scenery, trees / rocks / gold / crystals                   |
 | `src/env.ts`                                     | Lighting, day/night, act palettes, seasons and weather                    |
 | `src/models.ts`                                  | Every 3D model, built from primitives in code, and the shared shaders     |
-| `src/fx.ts`                                      | Instanced particles and health bars, rings, beams, lightning, coin drops  |
+| `src/fx.ts`                                      | Instanced particles (chunks, smoke and fire puffs, sparks), explosions, health bars, coin drops |
 | `src/happenings.ts`                              | Treasure chests, the travelling merchant, gold rushes                     |
 | `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                    |
 | `src/ui.ts`, `src/style.css`, `index.html`       | HUD, ability bar, perk picker and menus                                   |

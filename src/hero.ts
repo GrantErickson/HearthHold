@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { scene } from './engine';
 import { CFG } from './config';
 import { G, type DamageKind, type ResType } from './state';
-import { unitModel, setModelMat, itemGeo, ITEM_H, makeMesh, Mat, type UnitModel } from './models';
+import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, type UnitModel } from './models';
 import { Input } from './input';
 import { pushOut } from './structures';
 import { World } from './world';
 import { enemies, type Enemy } from './units';
-import { Bar, burst, fly, text, flash } from './fx';
+import { Bar, burst, fly, text, slash, dust, spark, ring, puff } from './fx';
+import { on } from './events';
 import { Sfx } from './audio';
 import { Stat } from './progress';
 import { angleLerp, clamp } from './util';
@@ -47,8 +48,8 @@ let swingT = 1;
 let swingStarted = false;
 let deadT = 0;
 let sinceHit = 99;
+let slashFlip = 1;
 let targetFacing = 0;
-let flashT = 0;
 let fullShown = false;
 let spinT = 0;
 
@@ -75,8 +76,7 @@ function hurt(amount: number, kind: DamageKind, src?: unknown): void {
   }
   hero.hp -= amount;
   sinceHit = 0;
-  flashT = 0.12;
-  if (model) setModelMat(model, Mat.flash);
+  if (model) hitPulse(model);
   Sfx.play('hurt', 0.8);
   const th = Stat.thorns();
   if (th > 0 && kind === 'melee' && src && typeof (src as Enemy).damage === 'function' && (src as Enemy).alive) {
@@ -222,9 +222,25 @@ function pickup(node: ReturnType<typeof World.nearestHarvestable>): void {
   Sfx.play(t === 'wood' ? 'chop' : 'mine');
 }
 
+let stepT = 0;
+on('levelUp', () => {
+  if (G.autotest) return;
+  ring(hero.x, hero.z, 0xffd54a, 3.2, 0.6);
+  puff(hero.x, 0.4, hero.z, 0xfff4c8, { n: 8, spread: 0.6, size: 0.35, life: 0.7, up: 2.2, out: 2 });
+  for (let i = 0; i < 4; i++) spark(hero.x + (Math.random() - 0.5) * 1.6, 1.2 + Math.random() * 1.6, hero.z + (Math.random() - 0.5) * 1.6, 0xffe27a, 1.1, 0.45);
+  burst(hero.x, 1.2, hero.z, 0xffd54a, 16, { glow: true, speed: 4, up: 5, life: 0.8 });
+});
+
 export function heroUpdate(dt: number): void {
   if (!model || !bar) return;
   const m = model;
+  if (hero.alive && hero.moving) {
+    stepT -= dt;
+    if (stepT <= 0) {
+      stepT = 0.26;
+      dust(hero.x - Math.sin(hero.facing) * 0.3, hero.z - Math.cos(hero.facing) * 0.3, 0.45);
+    }
+  }
   if (!hero.alive) {
     deadT += dt;
     m.group.rotation.x = Math.max(-Math.PI / 2, m.group.rotation.x - dt * 6);
@@ -261,8 +277,8 @@ export function heroUpdate(dt: number): void {
       for (const e of enemies) {
         if (e !== foe && e.alive && Math.hypot(e.x - foe.x, e.z - foe.z) < cr) e.damage(dmg * cm, 'melee', hero);
       }
-      burst(foe.x, 1.1 * foe.scale + foe.flyH, foe.z, 0xff5a3a, 4, { speed: 3, up: 2, size: 0.1, life: 0.35 });
-      flash(foe.x, 1.1 * foe.scale + foe.flyH, foe.z, 0xffc080, 0.9, 0.12);
+      slashFlip = -slashFlip;
+      slash(hero.x, 1.05 + foe.flyH * 0.5, hero.z, Math.atan2(foe.x - hero.x, foe.z - hero.z), 0xfff4dc, 1.55, 0.2, slashFlip);
       Sfx.play('hit');
     }
   } else if (!stunned && hero.stack.length < capacity()) {
@@ -297,10 +313,7 @@ export function heroUpdate(dt: number): void {
   const mh = maxHp();
   if (sinceHit > Stat.regenDelay() && hero.hp < mh) hero.hp = Math.min(mh, hero.hp + Stat.heroRegen() * dt);
   if (hero.hp > mh) hero.hp = mh;
-  if (flashT > 0) {
-    flashT -= dt;
-    if (flashT <= 0) setModelMat(m, hero.slowT > 0 ? Mat.chill : null);
-  } else setModelMat(m, hero.slowT > 0 ? Mat.chill : null);
+  updateLook(m, dt, hero.slowT > 0 ? 'chill' : G.buffs.warcry > 0 ? 'holy' : null, G.time);
 
   hero.facing = angleLerp(hero.facing, targetFacing, Math.min(1, dt * 14));
   m.group.position.set(hero.x, 0, hero.z);

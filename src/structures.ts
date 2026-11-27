@@ -6,8 +6,9 @@ import {
   makeMesh, keepGeo, keepTop, marketGeo, wallGeo, wallRubbleGeo, towerGeo, towerTop, towerRubbleGeo,
   catBaseGeo, catArmGeo, itemGeo, Mat, frostTowerGeo, frostOrbGeo, mageTowerGeo, mageOrbGeo, ballistaBaseGeo,
   ballistaHeadGeo, fireTowerGeo, flameGeo, spireGeo, spireOrbGeo, spireTop, spikesGeo, spikeBedGeo, tarGeo,
+  cannonBaseGeo, cannonGunGeo, aerieGeo, aerieTop, roostGeo, ROOST_PERCH,
 } from './models';
-import { Bar, burst, fly, pop, text, lightning, beam, ring, flash } from './fx';
+import { Bar, burst, fly, pop, text, lightning, beam, ring, fire, puff, spark } from './fx';
 import { Sfx } from './audio';
 import { emit, on } from './events';
 import { enemies, soldiers, rangers, Units, applySlow, defenders, type Enemy } from './units';
@@ -72,12 +73,12 @@ export function steer(x: number, z: number, dx: number, dz: number, r: number, i
 
 // ───────────────────────────── Structures ─────────────────────────────
 
-export type SpecialKind = 'frost' | 'mage' | 'ballista' | 'fire' | 'spire';
+export type SpecialKind = 'frost' | 'mage' | 'ballista' | 'fire' | 'spire' | 'cannon' | 'aerie' | 'roost';
 export type StructKind = 'wall' | 'tower' | 'keep' | 'catapult' | SpecialKind;
 
 const NAMES: Record<StructKind, string> = {
   wall: 'Wall', tower: 'Tower', keep: 'Keep', catapult: 'Catapult', frost: 'Frost Tower', mage: 'Mage Tower',
-  ballista: 'Ballista', fire: 'Fire Tower', spire: 'Holy Spire',
+  ballista: 'Ballista', fire: 'Fire Tower', spire: 'Holy Spire', cannon: 'Cannon Battery', aerie: 'Griffin Aerie', roost: 'Dragon Roost',
 };
 
 export class Structure implements Target {
@@ -150,7 +151,7 @@ export class Structure implements Target {
     if (!this.alive) return;
     if (this.kind === 'keep' && G.god) return;
     this.hp -= amount;
-    this.flashT = 0.12;
+    if (this.flashT <= 0.1) this.flashT = 0.3;
     if (this.kind === 'keep') G.shake = Math.min(0.5, G.shake + 0.1);
     if (this.hp <= 0) {
       this.hp = 0;
@@ -338,13 +339,17 @@ export function buildCatapult(slot: Slot, lv: number): void {
 
 const SPECIAL_HP: Record<SpecialKind, number[]> = {
   frost: CFG.frost.hp, mage: CFG.mage.hp, ballista: CFG.ballista.hp, fire: CFG.fire.hp, spire: CFG.spire.hp,
+  cannon: CFG.cannon.hp, aerie: CFG.aerie.hp, roost: CFG.roost.hp,
 };
+/** Footprint half-size per special kind. */
+const SPECIAL_SIZE: Partial<Record<SpecialKind, number>> = { cannon: 1.75, aerie: 1.9, roost: 2.3 };
 
 export function buildSpecial(slot: Slot, kind: SpecialKind, x: number, z: number, lv: number): void {
   let t = slot.struct;
   const hp = SPECIAL_HP[kind][lv - 1];
+  const size = SPECIAL_SIZE[kind] ?? 1.25;
   if (!t) {
-    t = new Structure(slot.id, kind, x, z, 1.25, 1.25, lv, hp);
+    t = new Structure(slot.id, kind, x, z, size, size, lv, hp);
     S.special.push(t);
     slot.struct = t;
     t.slot = slot;
@@ -394,15 +399,33 @@ export function buildSpecial(slot: Slot, kind: SpecialKind, x: number, z: number
       t.top = spireTop(lv) + 0.3;
       break;
     }
+    case 'cannon': {
+      g.add(makeMesh(cannonBaseGeo(lv)));
+      spin = makeMesh(cannonGunGeo(lv));
+      spin.rotation.y = Math.PI;
+      t.spinY = 1.3;
+      t.top = 2.0;
+      break;
+    }
+    case 'aerie': {
+      g.add(makeMesh(aerieGeo(lv)));
+      t.top = aerieTop(lv);
+      break;
+    }
+    case 'roost': {
+      g.add(makeMesh(roostGeo(lv)));
+      t.top = ROOST_PERCH + 1.2;
+      break;
+    }
   }
   setMesh(t, g, !G.autotest);
   if (spin) {
     spin.position.y = t.spinY;
-    if (kind !== 'ballista') spin.userData.swap = false;
+    if (kind !== 'ballista' && kind !== 'cannon') spin.userData.swap = false;
     g.add(spin);
     t.spin = spin;
   }
-  addCollider(t.id, x, z, 1.25, 1.25);
+  addCollider(t.id, x, z, size, size);
 }
 
 export function buildTrap(slot: Slot, kind: TrapKind, x: number, z: number, lv: number): void {
@@ -474,8 +497,16 @@ export function ruin(s: Structure): void {
 }
 
 function destroyStructure(s: Structure): void {
-  burst(s.x, 1.5, s.z, 0x9a948a, 26, { speed: 6, up: 6, size: 0.3, life: 0.9 });
-  burst(s.x, 1.5, s.z, 0x7a5232, 12, { speed: 5, up: 5, size: 0.22, life: 0.9 });
+  burst(s.x, 1.5, s.z, 0x9a948a, 22, { speed: 6, up: 6, size: 0.3, life: 0.9 });
+  burst(s.x, 1.5, s.z, 0x7a5232, 10, { speed: 5, up: 5, size: 0.22, life: 0.9 });
+  // A big cartoon dust cloud as it collapses.
+  const span = s.kind === 'wall' ? 4.2 : Math.max(1.2, s.hw);
+  for (let i = 0; i < (s.kind === 'wall' ? 4 : 1); i++) {
+    const px = s.kind === 'wall' ? s.x - span + (i + 0.5) * (span * 2) / 4 : s.x;
+    puff(px, 0.6, s.z, 0xd8ccb8, { n: 6, spread: s.kind === 'wall' ? 1.1 : span * 0.7, size: 0.6, life: 1.1, up: 1.6, out: 2.2, grow: 0.7 });
+  }
+  for (let i = 0; i < 3; i++) spark(s.x + (Math.random() - 0.5) * span * 2, 1.5 + Math.random() * 2, s.z + (Math.random() - 0.5) * 2, 0xfff0c0, 1.1, 0.3);
+  G.shake = Math.min(0.7, G.shake + 0.25);
   Sfx.at('crumble', s.x, s.z, 1.2);
   if (s.kind === 'keep') {
     s.alive = false;
@@ -681,6 +712,33 @@ function densest(x: number, z: number, range: number, minRange: number, r2: numb
   return best;
 }
 
+/**
+ * Counter-battery targeting: siege engines and boulder-throwers first, then
+ * archers and casters, then bosses — preferring whatever lurks beyond the
+ * reach of the archer towers.
+ */
+function counterTarget(x: number, z: number, range: number, minRange: number): Enemy | null {
+  let best: Enemy | null = null;
+  let bs = -Infinity;
+  for (const e of enemies) {
+    if (!e.alive || e.flying) continue;
+    const d = Math.hypot(e.x - x, e.z - z);
+    if (d > range || d < minRange) continue;
+    const dd = e.d;
+    let sc = 0;
+    if (dd.siege || dd.lob) sc += 1000;
+    else if (dd.ranged) sc += 400;
+    if (e.isBoss || e.champion) sc += 250;
+    sc += Math.max(0, CFG.map.wallZ - 4 - e.z) * 6;
+    sc += Math.min(200, e.hp / 60);
+    if (sc > bs) {
+      bs = sc;
+      best = e;
+    }
+  }
+  return best;
+}
+
 function updateTowers(dt: number): void {
   const haste = Stat.haste();
   const tdmg = Stat.towerDmg();
@@ -746,6 +804,14 @@ function updateSpecial(t: Structure, dt: number): void {
   if (t.spin) {
     if (t.kind === 'ballista') {
       // rotated toward the target when firing
+    } else if (t.kind === 'cannon') {
+      // Recoil: the gun kicks back along its barrel and rolls forward again.
+      if (t.armT < 1) {
+        t.armT = Math.min(1, t.armT + dt / 0.6);
+        const k = t.armT < 0.12 ? t.armT / 0.12 : 1 - (t.armT - 0.12) / 0.88;
+        const a = t.spin.rotation.y;
+        t.spin.position.set(-Math.sin(a) * k * 0.45, t.spinY, -Math.cos(a) * k * 0.45);
+      }
     } else if (t.kind === 'fire') {
       const s = (0.8 + t.level * 0.1) * (1 + Math.sin(G.time * 14 + t.x) * 0.08);
       t.spin.scale.set(s, s * (1 + Math.sin(G.time * 9) * 0.1), s);
@@ -757,6 +823,37 @@ function updateSpecial(t: Structure, dt: number): void {
   if (t.frozenT > 0) return;
   t.cd -= dt * haste;
   switch (t.kind) {
+    case 'aerie':
+    case 'roost':
+      // Their griffins and dragon fly on their own (see allies.ts).
+      return;
+    case 'cannon': {
+      if (t.cd > 0) return;
+      const C = CFG.cannon;
+      const e = counterTarget(t.x, t.z, C.range[L], C.minRange);
+      if (!e) {
+        t.cd = 0.25;
+        return;
+      }
+      t.cd = C.interval[L];
+      const dist = Math.hypot(e.x - t.x, e.z - t.z);
+      const flight = Math.max(0.55, dist / 26);
+      const tx = e.x + e.vx * flight;
+      const tz = e.z + e.vz * flight;
+      const ang = Math.atan2(tx - t.x, tz - t.z);
+      if (t.spin) t.spin.rotation.y = ang;
+      t.armT = 0;
+      const mx = t.x + Math.sin(ang) * 1.6;
+      const mz = t.z + Math.cos(ang) * 1.6;
+      const my = t.spinY + 0.75;
+      fire(mx, my, mz, { n: 4, spread: 0.15, size: 0.32, life: 0.28, up: 0.6, out: 2.2 });
+      puff(mx, my, mz, 0xece6dc, { n: 5, spread: 0.3, size: 0.42, life: 0.9, up: 0.9, out: 1.6, grow: 0.7, delay: 0.04 });
+      spark(mx, my, mz, 0xfff0b0, 1.3, 0.2);
+      Proj.cannonball(mx, my, mz, tx, tz, C.dmg[L] * Stat.siegeDmg(), C.splash[L], flight);
+      G.shake = Math.min(0.35, G.shake + 0.06);
+      Sfx.at('boom', t.x, t.z, 0.9);
+      return;
+    }
     case 'frost': {
       const aura = CFG.frost.aura[L];
       const slow = CFG.frost.slow[L];
@@ -863,7 +960,8 @@ function updateSpecial(t: Structure, dt: number): void {
       t.cd = CFG.spire.interval;
       beam(t.x, t.top, t.z, e.x, e.aimY, e.z, 0xffe27a, 0.35, 0.3);
       beam(t.x, t.top, t.z, e.x, e.aimY, e.z, 0xffffff, 0.12, 0.25);
-      flash(e.x, e.aimY, e.z, 0xffe27a, 2, 0.3);
+      spark(e.x, e.aimY + 0.3, e.z, 0xffe27a, 1.6, 0.35);
+      burst(e.x, e.aimY, e.z, 0xffe27a, 8, { glow: true, speed: 3, up: 3, life: 0.5 });
       e.damage(CFG.spire.smite[L] * mdmg * Stat.holyFire(), 'holy');
       Sfx.at('magic', t.x, t.z, 0.6);
       return;
@@ -936,8 +1034,16 @@ function updateBars(dt: number): void {
     }
     const y = s.kind === 'wall' ? 4.2 : s.kind === 'keep' ? s.top + 4.5 : s.top + 1.4;
     s.bar.set(s.hp / s.maxHp, s.x, y, s.z);
-    if (s.flashT > 0) s.flashT -= dt;
-    setStructMat(s, s.flashT > 0 ? Mat.flash : s.frozenT > 0 ? Mat.frozen : null);
+    // Hits make the building shudder instead of flashing.
+    if (s.flashT > 0) {
+      s.flashT = Math.max(0, s.flashT - dt);
+      if (s.mesh) {
+        const k = s.flashT / 0.3;
+        const j = Math.sin(s.flashT * 70) * 0.07 * k;
+        s.mesh.position.set(s.x + j, 0, s.z + j * 0.5);
+      }
+    }
+    setStructMat(s, s.frozenT > 0 ? Mat.frozen : null);
   }
 }
 

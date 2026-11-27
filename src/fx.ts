@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { scene, camera, engine } from './engine';
-import { itemGeo, makeMesh, type ItemKind } from './models';
+import { itemGeo, makeMesh, celMaterial, ensureEmit, type ItemKind } from './models';
 import { hero } from './hero';
 import { G, addCoins } from './state';
 import { Sfx } from './audio';
@@ -25,8 +25,10 @@ export const glowTex = radialTex([[0, 'rgba(255,255,255,1)'], [0.25, 'rgba(255,2
 export const softTex = radialTex([[0, 'rgba(255,255,255,1)'], [0.6, 'rgba(255,255,255,0.5)'], [1, 'rgba(255,255,255,0)']]);
 
 // ───────────────────────────── Particles ─────────────────────────────
-// All debris cubes are one instanced mesh and all glows are another, so a
-// busy battle costs two draw calls for particles instead of hundreds.
+// Every particle kind is one instanced mesh, so a busy battle costs a handful
+// of draw calls: rounded debris chunks, cartoon smoke puffs (shaded balls that
+// pop in and shrink away), fire puffs (bright balls that bloom), additive
+// glows and star-shaped impact sparks.
 
 interface Particle {
   x: number;
@@ -46,32 +48,226 @@ interface Particle {
   r: number;
   g: number;
   b: number;
+  /** Seconds before it appears (staggered explosions). */
+  delay: number;
 }
-const MAX_DEBRIS = 420;
-const MAX_GLOW = 520;
-const debris: Particle[] = [];
-const glows: Particle[] = [];
-let debrisMesh: THREE.InstancedMesh | null = null;
-let glowMesh: THREE.InstancedMesh | null = null;
+
+function starTexture(): THREE.CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const g = cv.getContext('2d')!;
+  const c = 64;
+  const grd = g.createRadialGradient(c, c, 0, c, c, 64);
+  grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+  grd.addColorStop(0.18, 'rgba(255,255,255,0.35)');
+  grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 128, 128);
+  // Four-point twinkle star.
+  g.fillStyle = '#fff';
+  g.beginPath();
+  const pts = 8;
+  for (let i = 0; i <= pts; i++) {
+    const a = (i / pts) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 === 0 ? 60 : 13;
+    const x = c + Math.cos(a) * r;
+    const y = c + Math.sin(a) * r;
+    if (i === 0) g.moveTo(x, y);
+    else g.lineTo(x, y);
+  }
+  g.closePath();
+  g.fill();
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+class Layer {
+  readonly list: Particle[] = [];
+  mesh: THREE.InstancedMesh | null = null;
+  constructor(
+    readonly max: number,
+    readonly make: () => THREE.InstancedMesh,
+    readonly draw: (p: Particle, i: number, mesh: THREE.InstancedMesh) => void,
+    readonly ground: boolean,
+  ) {}
+  ensure(): void {
+    if (this.mesh) return;
+    this.mesh = this.make();
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.max * 3), 3);
+    this.mesh.frustumCulled = false;
+    this.mesh.count = 0;
+    scene.add(this.mesh);
+  }
+  add(p: Particle): void {
+    if (this.list.length >= this.max) this.list.shift();
+    this.list.push(p);
+  }
+  step(dt: number): void {
+    const list = this.list;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const p = list[i];
+      if (p.delay > 0) {
+        p.delay -= dt;
+        continue;
+      }
+      p.t += dt;
+      if (p.t >= p.life) {
+        list.splice(i, 1);
+        continue;
+      }
+      p.vy -= p.grav * dt;
+      if (p.drag) {
+        const k = Math.exp(-p.drag * dt);
+        p.vx *= k;
+        p.vz *= k;
+        p.vy *= k;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      if (this.ground && p.y < 0.05) {
+        p.y = 0.05;
+        p.vy = Math.abs(p.vy) * 0.3;
+        p.vx *= 0.6;
+        p.vz *= 0.6;
+      }
+      p.rx += dt * 6;
+    }
+  }
+  render(): void {
+    const m = this.mesh;
+    if (!m) return;
+    let n = 0;
+    for (const p of this.list) {
+      if (p.delay > 0) continue;
+      this.draw(p, n, m);
+      n++;
+    }
+    m.count = n;
+    m.instanceMatrix.needsUpdate = true;
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  }
+}
+
 const _col = new THREE.Color();
+const _pm = new THREE.Matrix4();
+const _pq = new THREE.Quaternion();
+const _pe = new THREE.Euler();
+const _pp = new THREE.Vector3();
+const _ps = new THREE.Vector3();
+
+const ballGeo = ensureEmit(new THREE.IcosahedronGeometry(1, 2));
+const chunkGeo = ensureEmit(new THREE.IcosahedronGeometry(0.62, 0));
+const quadGeo = new THREE.PlaneGeometry(1, 1);
+const starTex = starTexture();
+
+/** Pop in fast with a little overshoot, then shrink away: the classic cartoon puff. */
+function puffScale(k: number): number {
+  if (k < 0.18) {
+    const t = k / 0.18;
+    return 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
+  }
+  const t = (k - 0.18) / 0.82;
+  return 1 - t * t * t;
+}
+
+const debrisL = new Layer(
+  420,
+  () => new THREE.InstancedMesh(chunkGeo, celMaterial('fx-chunk'), 420),
+  (p, i, m) => {
+    const s = Math.max(0.001, p.size * (1 - (p.t / p.life) ** 2));
+    _pe.set(p.rx, p.ry, 0);
+    _pq.setFromEuler(_pe);
+    _pm.compose(_pp.set(p.x, p.y, p.z), _pq, _ps.set(s, s, s));
+    m.setMatrixAt(i, _pm);
+    m.setColorAt(i, _col.setRGB(p.r, p.g, p.b));
+  },
+  true,
+);
+
+const smokeL = new Layer(
+  360,
+  () => {
+    const m = new THREE.InstancedMesh(ballGeo, celMaterial('fx-smoke'), 360);
+    m.castShadow = false;
+    return m;
+  },
+  (p, i, m) => {
+    const k = p.t / p.life;
+    const s = Math.max(0.001, p.size * puffScale(k) * (1 + k * p.grow));
+    _pe.set(p.rx * 0.2, p.ry, 0);
+    _pq.setFromEuler(_pe);
+    _pm.compose(_pp.set(p.x, p.y, p.z), _pq, _ps.set(s, s * 0.9, s));
+    m.setMatrixAt(i, _pm);
+    m.setColorAt(i, _col.setRGB(p.r, p.g, p.b));
+  },
+  false,
+);
+
+const fireL = new Layer(
+  260,
+  () => new THREE.InstancedMesh(ballGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }), 260),
+  (p, i, m) => {
+    const k = p.t / p.life;
+    const s = Math.max(0.001, p.size * puffScale(k) * (1 + k * p.grow));
+    _pm.compose(_pp.set(p.x, p.y, p.z), _pq.identity(), _ps.set(s, s, s));
+    m.setMatrixAt(i, _pm);
+    // White-hot → the particle's colour → embers. Values above 1 bloom.
+    const hot = Math.max(0, 1 - k * 3.2);
+    const cool = Math.max(0, (k - 0.45) / 0.55);
+    const f = 1 - cool * 0.75;
+    m.setColorAt(i, _col.setRGB((p.r + hot * 1.4) * f * 1.6, (p.g + hot * 1.2) * f * (1.5 - cool), (p.b + hot * 0.9) * f * (1.4 - cool)));
+  },
+  false,
+);
+
+const glowL = new Layer(
+  520,
+  () => {
+    const m = new THREE.InstancedMesh(quadGeo, new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }), 520);
+    m.renderOrder = 20;
+    return m;
+  },
+  (p, i, m) => {
+    const k = 1 - p.t / p.life;
+    const s = Math.max(0.001, p.grow ? p.size * (1 + (1 - k) * p.grow) : p.size * (0.4 + k * 0.6));
+    _pm.compose(_pp.set(p.x, p.y, p.z), camera.quaternion, _ps.set(s, s, s));
+    m.setMatrixAt(i, _pm);
+    m.setColorAt(i, _col.setRGB(p.r * k, p.g * k, p.b * k));
+  },
+  false,
+);
+
+const starL = new Layer(
+  200,
+  () => {
+    const m = new THREE.InstancedMesh(quadGeo, new THREE.MeshBasicMaterial({ map: starTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false }), 200);
+    m.renderOrder = 24;
+    return m;
+  },
+  (p, i, m) => {
+    const k = p.t / p.life;
+    const s = Math.max(0.001, p.size * (k < 0.2 ? easeOutBack(k / 0.2) : 1 - (k - 0.2) / 0.8));
+    _pe.set(0, 0, p.rx * 0.6);
+    _pq.setFromEuler(_pe).premultiply(camera.quaternion);
+    _pm.compose(_pp.set(p.x, p.y, p.z), _pq, _ps.set(s, s, s));
+    m.setMatrixAt(i, _pm);
+    const b = 1.6 * (1 - k * 0.5);
+    m.setColorAt(i, _col.setRGB(p.r * b, p.g * b, p.b * b));
+  },
+  false,
+);
+
+const LAYERS = [debrisL, smokeL, fireL, glowL, starL];
 
 function ensureParticleMeshes(): void {
-  if (debrisMesh) return;
-  debrisMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), MAX_DEBRIS);
-  debrisMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_DEBRIS * 3), 3);
-  debrisMesh.frustumCulled = false;
-  debrisMesh.count = 0;
-  scene.add(debrisMesh);
-  glowMesh = new THREE.InstancedMesh(
-    new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({ map: glowTex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
-    MAX_GLOW,
-  );
-  glowMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_GLOW * 3), 3);
-  glowMesh.frustumCulled = false;
-  glowMesh.renderOrder = 20;
-  glowMesh.count = 0;
-  scene.add(glowMesh);
+  for (const l of LAYERS) l.ensure();
+}
+
+function mk(x: number, y: number, z: number, color: number, o: Partial<Particle>): Particle {
+  _col.set(color);
+  return { x, y, z, vx: 0, vy: 0, vz: 0, t: 0, life: 0.6, size: 0.2, grow: 0, grav: 0, drag: 0, rx: Math.random() * 6, ry: Math.random() * 6, r: _col.r, g: _col.g, b: _col.b, delay: 0, ...o };
 }
 
 export interface BurstOpts {
@@ -80,7 +276,7 @@ export interface BurstOpts {
   life?: number;
   size?: number;
   grav?: number;
-  /** Glowing additive sprites instead of debris cubes. */
+  /** Glowing additive sprites instead of debris chunks. */
   glow?: boolean;
   drag?: number;
   /** Spawn spread radius. */
@@ -91,110 +287,146 @@ export function burst(x: number, y: number, z: number, color: number, count: num
   if (G.autotest) return;
   ensureParticleMeshes();
   const add = !!o.glow;
-  const list = add ? glows : debris;
-  const max = add ? MAX_GLOW : MAX_DEBRIS;
-  _col.set(color);
+  const layer = add ? glowL : debrisL;
   for (let i = 0; i < count; i++) {
-    if (list.length >= max) list.shift();
     const sp = o.spread ?? 0;
     const a = Math.random() * Math.PI * 2;
     const s = (o.speed ?? 3) * (0.4 + Math.random() * 0.6);
-    list.push({
-      x: x + (Math.random() - 0.5) * sp,
-      y,
-      z: z + (Math.random() - 0.5) * sp,
-      vx: Math.cos(a) * s,
-      vz: Math.sin(a) * s,
-      vy: (o.up ?? 3) * (0.5 + Math.random() * 0.8),
-      t: 0,
-      life: (o.life ?? 0.6) * (0.7 + Math.random() * 0.6),
-      size: (o.size ?? 0.14) * (add ? 3 : 1),
-      grow: 0,
-      grav: o.grav ?? (add ? 2 : 12),
-      drag: o.drag ?? (add ? 2.5 : 0),
-      rx: Math.random() * 3,
-      ry: Math.random() * 3,
-      r: _col.r,
-      g: _col.g,
-      b: _col.b,
+    layer.add(
+      mk(x + (Math.random() - 0.5) * sp, y, z + (Math.random() - 0.5) * sp, color, {
+        vx: Math.cos(a) * s,
+        vz: Math.sin(a) * s,
+        vy: (o.up ?? 3) * (0.5 + Math.random() * 0.8),
+        life: (o.life ?? 0.6) * (0.7 + Math.random() * 0.6),
+        size: (o.size ?? 0.14) * (add ? 3 : 1.1),
+        grav: o.grav ?? (add ? 2 : 12),
+        drag: o.drag ?? (add ? 2.5 : 0),
+      }),
+    );
+  }
+}
+
+/** Short additive glow (magic, muzzle flashes). */
+export function flash(x: number, y: number, z: number, color: number, size: number, life = 0.25): void {
+  if (G.autotest) return;
+  ensureParticleMeshes();
+  glowL.add(mk(x, y, z, color, { life, size, grow: 0.5 }));
+}
+
+export interface PuffOpts {
+  /** Number of puffs. */
+  n?: number;
+  /** Radius the puffs are scattered over. */
+  spread?: number;
+  size?: number;
+  life?: number;
+  /** Upward drift. */
+  up?: number;
+  /** Outward speed. */
+  out?: number;
+  /** Extra growth over life (0 = none). */
+  grow?: number;
+  delay?: number;
+}
+
+/** Cartoon smoke / dust puffs: shaded balls that pop in and shrink away. */
+export function puff(x: number, y: number, z: number, color: number, o: PuffOpts = {}): void {
+  if (G.autotest) return;
+  ensureParticleMeshes();
+  const n = o.n ?? 5;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = (o.spread ?? 0.5) * Math.sqrt(Math.random());
+    const out = (o.out ?? 1.2) * (0.5 + Math.random() * 0.7);
+    const shade = 0.86 + Math.random() * 0.22;
+    _col.set(color);
+    smokeL.add({
+      ...mk(x + Math.cos(a) * r, y + Math.random() * 0.2, z + Math.sin(a) * r, color, {
+        vx: Math.cos(a) * out,
+        vz: Math.sin(a) * out,
+        vy: (o.up ?? 1.2) * (0.6 + Math.random() * 0.8),
+        life: (o.life ?? 0.8) * (0.75 + Math.random() * 0.5),
+        size: (o.size ?? 0.4) * (0.7 + Math.random() * 0.6),
+        grow: o.grow ?? 0.3,
+        drag: 2.2,
+        delay: (o.delay ?? 0) + Math.random() * 0.06,
+      }),
+      r: _col.r * shade,
+      g: _col.g * shade,
+      b: _col.b * shade,
     });
   }
 }
 
-/** Short additive glow flash (hits, muzzle flashes, explosions). */
-export function flash(x: number, y: number, z: number, color: number, size: number, life = 0.25): void {
+/** Bright fire balls (they bloom), white-hot at first and cooling to embers. */
+export function fire(x: number, y: number, z: number, o: PuffOpts & { color?: number } = {}): void {
   if (G.autotest) return;
   ensureParticleMeshes();
-  if (glows.length >= MAX_GLOW) glows.shift();
-  _col.set(color);
-  glows.push({ x, y, z, vx: 0, vy: 0, vz: 0, t: 0, life, size, grow: 0.5, grav: 0, drag: 0, rx: 0, ry: 0, r: _col.r, g: _col.g, b: _col.b });
+  const n = o.n ?? 5;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = (o.spread ?? 0.4) * Math.sqrt(Math.random());
+    const out = (o.out ?? 1.5) * (0.5 + Math.random() * 0.7);
+    fireL.add(
+      mk(x + Math.cos(a) * r, y + Math.random() * 0.25, z + Math.sin(a) * r, o.color ?? 0xff7a1a, {
+        vx: Math.cos(a) * out,
+        vz: Math.sin(a) * out,
+        vy: (o.up ?? 2) * (0.6 + Math.random() * 0.8),
+        life: (o.life ?? 0.5) * (0.75 + Math.random() * 0.5),
+        size: (o.size ?? 0.35) * (0.7 + Math.random() * 0.6),
+        grow: o.grow ?? 0.2,
+        drag: 2.6,
+        delay: (o.delay ?? 0) + Math.random() * 0.05,
+      }),
+    );
+  }
 }
 
-function stepList(list: Particle[], dt: number, ground: boolean): void {
-  for (let i = list.length - 1; i >= 0; i--) {
-    const p = list[i];
-    p.t += dt;
-    if (p.t >= p.life) {
-      list.splice(i, 1);
-      continue;
-    }
-    p.vy -= p.grav * dt;
-    if (p.drag) {
-      const k = Math.exp(-p.drag * dt);
-      p.vx *= k;
-      p.vz *= k;
-      p.vy *= k;
-    }
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.z += p.vz * dt;
-    if (ground && p.y < 0.05) {
-      p.y = 0.05;
-      p.vy = Math.abs(p.vy) * 0.3;
-      p.vx *= 0.6;
-      p.vz *= 0.6;
-    }
-    p.rx += dt * 6;
-  }
+/** Star-shaped impact sparkle. */
+export function spark(x: number, y: number, z: number, color = 0xfff2c0, size = 0.7, life = 0.28): void {
+  if (G.autotest) return;
+  ensureParticleMeshes();
+  starL.add(mk(x, y, z, color, { life, size }));
+}
+
+/** A hit landing: a star, a couple of flecks. Colour by damage type. */
+export function impact(x: number, y: number, z: number, color = 0xfff2c0, big = false): void {
+  if (G.autotest) return;
+  spark(x, y, z, color, big ? 1.25 : 0.75, big ? 0.32 : 0.24);
+  burst(x, y, z, color, big ? 4 : 2, { glow: true, speed: big ? 5 : 3.5, up: 2, life: 0.25, size: 0.06 });
+}
+
+/** Cartoon explosion: white-hot fireballs, rolling smoke, flying chunks, a shockwave and sparkles. */
+export function boom(x: number, y: number, z: number, radius: number, o: { color?: number; smoke?: number; chunks?: number } = {}): void {
+  if (G.autotest) return;
+  const r = Math.max(0.6, radius);
+  flash(x, y + 0.4, z, o.color ?? 0xffb060, r * 2.2, 0.22);
+  fire(x, y + 0.3, z, { n: Math.round(5 + r * 3), spread: r * 0.35, size: 0.32 + r * 0.16, life: 0.5, up: 2.4, out: 1.4 + r * 0.8, color: o.color });
+  puff(x, y + 0.5, z, o.smoke ?? 0x5a524c, { n: Math.round(4 + r * 2.5), spread: r * 0.45, size: 0.35 + r * 0.18, life: 1.1, up: 1.8, out: 0.8 + r * 0.5, delay: 0.08, grow: 0.5 });
+  burst(x, y + 0.3, z, o.smoke ?? 0x5a4a3a, o.chunks ?? Math.round(5 + r * 2), { speed: 4 + r * 2, up: 6, size: 0.16 + r * 0.03, life: 0.9 });
+  for (let i = 0; i < 3; i++) spark(x + (Math.random() - 0.5) * r, y + 0.6 + Math.random() * r * 0.6, z + (Math.random() - 0.5) * r, 0xfff0b0, 0.8 + r * 0.25, 0.35);
+  ring(x, z, o.color ?? 0xffa04a, r * 1.3, 0.45);
+}
+
+/** A defeated enemy vanishes in a puff of cartoon smoke. */
+export function poof(x: number, y: number, z: number, size = 1, color = 0xf2ece4): void {
+  if (G.autotest) return;
+  puff(x, y, z, color, { n: Math.round(5 + size * 3), spread: 0.35 * size, size: 0.32 * size, life: 0.6, up: 1.4, out: 1.6 * size, grow: 0.25 });
+  spark(x, y + 0.4 * size, z, 0xffffff, 0.7 * size, 0.3);
+}
+
+/** Little dust kick (footfalls, landings, building). */
+export function dust(x: number, z: number, size = 1, color = 0xc8b898): void {
+  if (G.autotest) return;
+  puff(x, 0.15, z, color, { n: Math.round(3 + size * 2), spread: 0.4 * size, size: 0.22 * size, life: 0.55, up: 0.6, out: 1.4 * size, grow: 0.3 });
 }
 
 function updateParticles(dt: number): void {
-  stepList(debris, dt, true);
-  stepList(glows, dt, false);
+  for (const l of LAYERS) l.step(dt);
 }
 
-const _pm = new THREE.Matrix4();
-const _pq = new THREE.Quaternion();
-const _pe = new THREE.Euler();
-const _pp = new THREE.Vector3();
-const _ps = new THREE.Vector3();
-
 function drawParticles(): void {
-  if (!debrisMesh || !glowMesh) return;
-  for (let i = 0; i < debris.length; i++) {
-    const p = debris[i];
-    const s = Math.max(0.001, p.size * (1 - p.t / p.life));
-    _pe.set(p.rx, p.ry, 0);
-    _pq.setFromEuler(_pe);
-    _pm.compose(_pp.set(p.x, p.y, p.z), _pq, _ps.set(s, s, s));
-    debrisMesh.setMatrixAt(i, _pm);
-    debrisMesh.setColorAt(i, _col.setRGB(p.r, p.g, p.b));
-  }
-  debrisMesh.count = debris.length;
-  debrisMesh.instanceMatrix.needsUpdate = true;
-  if (debrisMesh.instanceColor) debrisMesh.instanceColor.needsUpdate = true;
-  const q = camera.quaternion;
-  for (let i = 0; i < glows.length; i++) {
-    const p = glows[i];
-    const k = 1 - p.t / p.life;
-    const s = Math.max(0.001, p.grow ? p.size * (1 + (1 - k) * p.grow) : p.size * (0.4 + k * 0.6));
-    _pm.compose(_pp.set(p.x, p.y, p.z), q, _ps.set(s, s, s));
-    glowMesh.setMatrixAt(i, _pm);
-    glowMesh.setColorAt(i, _col.setRGB(p.r * k, p.g * k, p.b * k));
-  }
-  glowMesh.count = glows.length;
-  glowMesh.instanceMatrix.needsUpdate = true;
-  if (glowMesh.instanceColor) glowMesh.instanceColor.needsUpdate = true;
+  for (const l of LAYERS) l.render();
 }
 
 // ───────────────────────────── Rings, flashes and beams ─────────────────────────────
@@ -218,6 +450,28 @@ export function ring(x: number, z: number, color: number, radius: number, life =
   m.renderOrder = 8;
   scene.add(m);
   rings.push({ m, t: 0, life, from: radius * from, to: radius });
+}
+
+interface Slash {
+  m: THREE.Mesh;
+  t: number;
+  life: number;
+  spin: number;
+  size: number;
+}
+const slashGeo = new THREE.RingGeometry(0.62, 1, 28, 1, 0, Math.PI * 0.95).rotateX(-Math.PI / 2);
+const slashes: Slash[] = [];
+
+/** Cartoon sword swoosh: a bright crescent that sweeps and fades in front of `facing`. */
+export function slash(x: number, y: number, z: number, facing: number, color = 0xffffff, size = 1.5, life = 0.2, spin = 1): void {
+  if (G.autotest) return;
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.Mesh(slashGeo, mat);
+  m.position.set(x, y, z);
+  m.rotation.set(0, facing + Math.PI - spin * 0.5, 0);
+  m.renderOrder = 21;
+  scene.add(m);
+  slashes.push({ m, t: 0, life, spin, size });
 }
 
 interface Beam {
@@ -267,6 +521,20 @@ export function lightning(ax: number, ay: number, az: number, bx: number, by: nu
 }
 
 function updateShapes(dt: number): void {
+  for (let i = slashes.length - 1; i >= 0; i--) {
+    const sl = slashes[i];
+    sl.t += dt;
+    const k = sl.t / sl.life;
+    if (k >= 1) {
+      scene.remove(sl.m);
+      (sl.m.material as THREE.Material).dispose();
+      slashes.splice(i, 1);
+      continue;
+    }
+    sl.m.rotation.y += sl.spin * dt * 7;
+    sl.m.scale.setScalar(sl.size * (0.7 + 0.45 * Math.sqrt(k)));
+    (sl.m.material as THREE.MeshBasicMaterial).opacity = 0.95 * (1 - k * k);
+  }
   for (let i = rings.length - 1; i >= 0; i--) {
     const r = rings[i];
     r.t += dt;

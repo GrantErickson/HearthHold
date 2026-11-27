@@ -30,13 +30,24 @@ no accounts.** Progress is stored only in the player's browser.
 - Vite 6 + TypeScript 5 (strict), Three.js r170. No backend.
 - All 3D models are built in code from primitives (no asset files), merged into
   one geometry per model with vertex colours **and a per-vertex glow value**.
-  Static models get baked ambient occlusion (darker near the ground).
+  Boxes are rounded, curved parts keep smooth normals and get enough segments to
+  read as round; only crystals, spikes and other deliberately sharp shapes are
+  faceted. Static models get baked ambient occlusion (darker near the ground).
+- **Cartoon rendering**: the shared shader cel-shades sunlight into three soft
+  bands and adds a rim highlight to characters and buildings. Post-processing
+  (`src/post.ts`) draws ink outlines from depth discontinuities and blooms
+  anything brighter than white (magic, fire, sparks, lit windows). Touch devices
+  skip the bloom. `?nopost` turns post-processing off.
 - One shared shader extension (injected into `MeshLambertMaterial`) adds:
   wind sway for trees and grass, act seasons (autumn/grey/winter tints on leafy
   colours), snow on upward faces, self-lit glow (torches, crystals, runes, eyes)
   and windows that light up at night.
-- Particles and health bars are instanced (a handful of draw calls in total).
+- Particles and health bars are instanced (a handful of draw calls in total):
+  rounded debris chunks, cartoon smoke puffs (shaded balls that pop in and shrink
+  away), white-hot fire puffs, additive glows and star-shaped impact sparks.
   Every material variant is compiled at boot to avoid mid-battle hitches.
+- Each character has its own material instance (same shader), so hits and
+  status effects tint smoothly instead of swapping whole-model colours.
 - Sound effects are synthesized with the Web Audio API (no audio files). No
   sound is scheduled until a user gesture has started the audio context.
 - Save data: `localStorage` key `hearthold-save-v2` (v1 saves from the 20-wave
@@ -76,7 +87,7 @@ Top of the screen is north. Enemies enter from the north edge.
  z=-27   [spikes]  [tar]   [spikes]   [tar]  [spikes]          traps in the field
  z=-20  |==W0==|==W1==|==W2==|==W3==|==W4==|==W5==|           wall (6 × 10 wide)
  z=-15  Fire  T1  Frost  T2  Ballista  T3  Mage  T4  Spire     tower row, 5 behind the wall
- z=-9                    Catapult
+ z=-8   Roost       Cannon  Catapult  Cannon      Aerie
         forest |  MktUp [MARKET]   [SMITH] Boots | quarry
                |  Pack  SELL COINS  Sword Armor Tools
                | Merchant  KeepUp  Merchant      | GoldPad
@@ -117,6 +128,9 @@ All costs and unlocks live in `src/pads.ts`; stats live in `src/config.ts`.
 | **Mage Tower** | 2000 · 3500 · 7000 · 13000 — chain lightning (ignores armor) | wave 26 |
 | **Fire Tower** | 2600 · 4500 · 9000 · 16000 — fireballs that set groups alight | wave 32 |
 | **Holy Spire** | 5000 · 9000 · 16000 — heals troops, mends walls, smites (×2 vs undead) | wave 44 |
+| **Cannon Battery** ×2 | 3500 · 7500 · 16000 · 34000 — range 30–36, explosive shot; targets siege engines and boulder-throwers first, then archers and casters, then bosses | waves 26 / 33 + Keep 4 |
+| **Griffin Aerie** | 9000 · 19000 · 38000 · 72000 — 2–5 griffin riders that fly anywhere and dive on siege engines, ranged enemies, flyers and stragglers | wave 36 + Keep 5 |
+| **Dragon Roost** | 45000 · 110000 · 240000 — the village dragon circles the field and strafes the densest enemies with fire (burns) | waves 56 / 70 / 84 + Keep 7–8 |
 | **Spike Pits** ×3 | 150 · 400 · 1100 · 3000 — damage everything walking over | waves 5 / 7 / 9 |
 | **Tar Pits** ×2 | 500 · 1400 · 3500 — slow, Lv3 burns | wave 18 |
 | Catapult | 900 · 2000 · **Great Trebuchet** 6000 | Keep 3 / 4 / 6 |
@@ -183,8 +197,11 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
 - Each act changes the palette and weather: fireflies (I), autumn leaves and
   amber trees (II), grey ash and fog (III), snow on every roof and field (IV),
   embers under a crimson sky (V).
-- Wind-swept grass and trees, glowing magic, lightning, fire trails, shockwaves,
-  hit flashes, chill/burn tints and frozen towers.
+- Cartoon look: rounded models, cel shading, ink outlines, bloom on magic and fire.
+- Hits squash the target and pop a star; deaths squash, spring and vanish in a
+  puff of smoke; explosions are white-hot fireballs, rolling smoke, chunks and a
+  shockwave; buildings shudder when struck and collapse in a dust cloud; the
+  hero's sword leaves swooshes. Chill, burn and holy show as gentle tints.
 - HUD: coins, backpack, HP, level and XP, objective, buffs; wave card with act,
   countdown/enemies left and the next wave's boss or modifier; keep HP; boss bar
   (with shield); speed, pause and mute; ability bar.

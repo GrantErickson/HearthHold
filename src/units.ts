@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { scene } from './engine';
 import {
-  CFG, AFFIXES, MODS, hpScale, bossScale, dmgScale, coinScale, xpScale, type EnemyDef,
+  CFG, AFFIXES, MODS, hpScale, bossScale, dmgScale, coinScale, xpScale, marchScale, type EnemyDef,
 } from './config';
 import { G, type DamageKind, type EnemyType, type ResType, type Target } from './state';
-import { unitModel, setModelMat, itemGeo, ITEM_H, makeMesh, Mat, type UnitModel } from './models';
+import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, type UnitModel } from './models';
 import * as St from './structures';
 import { hero, heroSlow, heroStun } from './hero';
 import { World, type ResNode } from './world';
-import { Bar, burst, dropCoins, text, ring, flash, beam } from './fx';
+import { Bar, burst, dropCoins, text, ring, beam, boom, poof, impact } from './fx';
 import { Sfx } from './audio';
 import { Proj } from './projectiles';
 import { Stat, gainXp } from './progress';
@@ -18,6 +18,39 @@ import { aimPoint, angleLerp, clamp, surfDist } from './util';
 const MAP = CFG.map;
 const W = MAP.wallZ;
 const PHYSICAL = new Set<DamageKind>(['melee', 'arrow', 'splash', 'pierce']);
+
+/** Impact star colour per damage type (splash gets its own explosion instead). */
+const HIT_COLOR: Partial<Record<DamageKind, number>> = {
+  melee: 0xfff4d0,
+  arrow: 0xfff0c0,
+  pierce: 0xfff0c0,
+  magic: 0xe0a8ff,
+  fire: 0xffa040,
+  holy: 0xffe27a,
+};
+
+/**
+ * Cartoon knock-out: squash flat, spring up with a spin, then vanish in a puff.
+ * Returns true when the unit can be removed.
+ */
+function cartoonDeath(m: UnitModel, t: number, x: number, z: number, scale: number, smoke: number): boolean {
+  const g = m.group;
+  const b = m.body;
+  if (t < 0.12) {
+    const k = t / 0.12;
+    b.scale.set(1 + 0.35 * k, 1 - 0.45 * k, 1 + 0.35 * k);
+  } else if (t < 0.38) {
+    const k = (t - 0.12) / 0.26;
+    b.scale.set(1.35 - 0.6 * k, 0.55 + 0.6 * k, 1.35 - 0.6 * k);
+    g.position.y = Math.sin(k * Math.PI) * 0.7 * scale;
+    g.rotation.y += 0.35;
+  } else {
+    poof(x, 0.8 * scale, z, scale, smoke);
+    g.visible = false;
+    return true;
+  }
+  return false;
+}
 
 function structId(t: Target): string | undefined {
   return t.isStruct ? (t as St.Structure).id : undefined;
@@ -83,6 +116,7 @@ export class Enemy implements Target {
   flashT = 0;
   flashCd = 0;
   deathT = 0;
+  poofed = false;
   summonT: number;
   healT: number;
   slamT: number;
@@ -140,7 +174,7 @@ export class Enemy implements Target {
     const coinMul = (mod?.coins ?? 1) * (elite ? 2.5 : 1) * (champ ? 10 : 1) * (this.summoned ? 0.5 : 1);
     this.coins = d.coins * coinScale(wave) * coinMul;
     this.xp = d.xp * xpScale(wave) * (elite ? 2.5 : 1) * (champ ? 8 : 1) * (this.summoned ? 0.5 : 1);
-    this.speed = d.speed * (0.9 + Math.random() * 0.2) * (mod?.speed ?? 1) * (this.affix === 'swift' ? 1.45 : 1) * Stat.enemySpeedMul() * (champ ? 0.9 : 1);
+    this.speed = d.speed * (0.9 + Math.random() * 0.2) * (mod?.speed ?? 1) * (this.affix === 'swift' ? 1.45 : 1) * Stat.enemySpeedMul() * (champ ? 0.9 : 1) * marchScale(wave);
     this.interval = d.interval;
     this.scale = d.scale * (champ ? 1.45 : 1) * (elite ? 1.12 : 1);
     this.slowImmune = !!d.slowImmune || !!d.boss;
@@ -212,11 +246,13 @@ export class Enemy implements Target {
     if (d.undead && kind === 'holy') amount *= 2;
     if (this.armor > 0 && PHYSICAL.has(kind)) amount = Math.max(amount * 0.25, amount - this.armor);
     if (src === hero) this.heroHit = true;
-    // Rate-limit the flash so constantly-hit enemies don't turn into a red blob.
+    // A squash and a soft glow; big enemies that are hit constantly react less.
+    const big = this.isBoss || this.scale > 1.6;
+    hitPulse(this.m, big ? 0.22 : 1);
     if (this.flashCd <= 0) {
-      this.flashT = 0.08;
-      this.flashCd = this.isBoss || this.scale > 1.6 ? 0.45 : 0.22;
-      setModelMat(this.m, this.isBoss || this.scale > 1.6 ? Mat.flashSoft : Mat.flash);
+      this.flashCd = big ? 0.3 : 0.12;
+      const c = HIT_COLOR[kind];
+      if (c) impact(this.x + (Math.random() - 0.5) * 0.4 * this.scale, (this.aimY ?? 1.1) + (Math.random() - 0.3) * 0.4 * this.scale, this.z + 0.3, c, kind === 'melee' || kind === 'pierce');
     }
     this.lose(amount);
   }
@@ -238,7 +274,6 @@ export class Enemy implements Target {
     G.stats.kills++;
     dropCoins(this.x, this.z, this.coins * Stat.killCoinMul() + Stat.killCoinFlat());
     gainXp(this.xp * (this.heroHit ? 1.5 : 1));
-    burst(this.x, 1 + this.flyH, this.z, 0x9a8a7a, 10, { speed: 3, up: 3, size: 0.2 });
     if (this.d.undead) burst(this.x, 1 + this.flyH, this.z, 0x9affc8, 8, { speed: 2, up: 3, glow: true });
     Sfx.at('die', this.x, this.z);
     if (this.d.bomb) explode(this.x, this.z, this.d.bomb.radius, this.dmg + this.d.bomb.dmg * dmgScale(this.wave) * 0.6, 'enemies');
@@ -411,18 +446,49 @@ export class Enemy implements Target {
   update(dt: number): void {
     if (!this.alive) {
       this.deathT += dt;
-      const g = this.m.group;
-      if (this.flying) {
-        g.position.y = Math.max(0, this.flyH - this.deathT * this.deathT * 9);
-        g.rotation.z += dt * 6;
-      } else if (this.d.model === 'ram' || this.d.model === 'trebuchet') {
-        g.position.y = -this.deathT * 0.9;
-        g.rotation.z = Math.min(0.5, this.deathT);
-      } else {
-        g.rotation.x = Math.max(-Math.PI / 2, -this.deathT * 6);
-        g.position.y = this.deathT > 0.6 ? -(this.deathT - 0.6) * 1.2 : 0;
+      if (this.exploded) {
+        this.removed = true;
+        return;
       }
-      if (this.deathT > 1.3) this.removed = true;
+      const g = this.m.group;
+      if (this.isBoss) {
+        // Bosses topple, then go up in a big cartoon blast.
+        if (this.flying) {
+          g.position.y = Math.max(0, this.flyH - this.deathT * this.deathT * 9);
+          g.rotation.z += dt * 4;
+        } else {
+          g.rotation.x = Math.max(-Math.PI / 2, -this.deathT * 3);
+        }
+        if (this.deathT > 0.9 && !this.poofed) {
+          this.poofed = true;
+          boom(this.x, 0.6, this.z, 3.2 * Math.min(1.6, this.scale), { color: 0xffc04a });
+          poof(this.x, 1.2, this.z, 2.4 * this.scale);
+        }
+        if (this.deathT > 1.25) this.removed = true;
+        return;
+      }
+      if (this.d.model === 'ram' || this.d.model === 'trebuchet') {
+        g.position.y = -this.deathT * 0.6;
+        g.rotation.z = Math.min(0.5, this.deathT);
+        if (!this.poofed) {
+          this.poofed = true;
+          boom(this.x, 0.8, this.z, 2.2, { smoke: 0x6a5a48, chunks: 14 });
+        }
+        if (this.deathT > 0.5) this.removed = true;
+        return;
+      }
+      if (this.flying) {
+        g.position.y = Math.max(0, this.flyH - this.deathT * this.deathT * 14);
+        g.rotation.z += dt * 8;
+        if (g.position.y <= 0.2 && !this.poofed) {
+          this.poofed = true;
+          poof(this.x, 0.5, this.z, this.scale, this.d.undead ? 0xd8f0e8 : 0xf2ece4);
+          this.removed = true;
+        }
+        if (this.deathT > 1.2) this.removed = true;
+        return;
+      }
+      if (cartoonDeath(this.m, this.deathT, this.x, this.z, this.scale, this.d.undead ? 0xd8f0e8 : 0xf2ece4)) this.removed = true;
       return;
     }
     const d = this.d;
@@ -434,10 +500,7 @@ export class Enemy implements Target {
     }
     if (this.slowT > 0) this.slowT -= dt;
     if (this.flashCd > 0) this.flashCd -= dt;
-    if (this.flashT > 0) {
-      this.flashT -= dt;
-      if (this.flashT <= 0) setModelMat(this.m, null);
-    } else setModelMat(this.m, this.stunT > 0 || this.slowT > 0 ? Mat.chill : this.burnT > 0 ? Mat.burn : null);
+    updateLook(this.m, dt, this.stunT > 0 || this.slowT > 0 ? 'chill' : this.burnT > 0 ? 'burn' : null, G.time);
     if (this.stunT > 0) {
       this.stunT -= dt;
       this.m.group.position.set(this.x, this.flyH, this.z);
@@ -542,6 +605,7 @@ export class Enemy implements Target {
       this.deathT = 0;
       this.bar.hide();
       setModelMat(this.m, null);
+      this.m.group.visible = false;
       return;
     }
     this.atkT = this.interval;
@@ -625,10 +689,7 @@ export function explode(x: number, z: number, radius: number, dmg: number, who: 
   } else {
     for (const e of enemies) if (e.alive && Math.hypot(e.x - x, e.z - z) < radius + e.r) e.damage(dmg, 'splash');
   }
-  burst(x, 0.8, z, 0xff8a2a, 22, { glow: true, speed: 8, up: 6, life: 0.6 });
-  burst(x, 0.5, z, 0x5a5048, 16, { speed: 6, up: 6, size: 0.25, life: 0.8 });
-  flash(x, 1.2, z, 0xffb060, radius * 2.2, 0.35);
-  ring(x, z, 0xff9a3a, radius * 1.3, 0.5);
+  boom(x, 0.4, z, radius);
   G.shake = Math.min(0.7, G.shake + 0.3);
   Sfx.at('explode', x, z, 1);
 }
@@ -709,14 +770,12 @@ export class Soldier implements Target {
   damage(amount: number, _kind: DamageKind): void {
     if (!this.alive) return;
     this.hp -= amount;
-    this.flashT = 0.1;
-    setModelMat(this.m, Mat.flash);
+    hitPulse(this.m);
     if (this.hp <= 0) {
       this.alive = false;
       this.deathT = 0;
       this.bar.hide();
       setModelMat(this.m, null);
-      burst(this.x, 1, this.z, 0x4f78c4, 10, { speed: 3, up: 3, size: 0.18 });
       Sfx.at('die', this.x, this.z, 0.7);
     }
   }
@@ -767,15 +826,11 @@ export class Soldier implements Target {
   update(dt: number): void {
     if (!this.alive) {
       this.deathT += dt;
-      this.m.group.rotation.x = Math.max(-Math.PI / 2, -this.deathT * 6);
-      if (this.deathT > 1.3) this.removed = true;
+      if (cartoonDeath(this.m, this.deathT, this.x, this.z, 1, 0xe8eef8)) this.removed = true;
       return;
     }
     if (this.slowT > 0) this.slowT -= dt;
-    if (this.flashT > 0) {
-      this.flashT -= dt;
-      if (this.flashT <= 0) setModelMat(this.m, null);
-    } else setModelMat(this.m, this.slowT > 0 || this.stunT > 0 ? Mat.chill : null);
+    updateLook(this.m, dt, this.slowT > 0 || this.stunT > 0 ? 'chill' : null, G.time);
     this.moving = false;
     if (this.stunT > 0) {
       this.stunT -= dt;

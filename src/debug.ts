@@ -207,7 +207,7 @@ function weight(s: Slot): number {
   if (s.id === 'keep') return 0.3;
   if (s.id.startsWith('wall')) return 0.5;
   if (s.id.startsWith('tower') || s.id === 'barracks' || s.id === 'catapult' || s.id === 'range') return 0.6;
-  if (['ballista', 'frost', 'mage', 'fire', 'spire'].includes(s.id)) return 0.55;
+  if (['ballista', 'frost', 'mage', 'fire', 'spire', 'cannon1', 'cannon2', 'aerie', 'roost'].includes(s.id)) return 0.55;
   if (s.id.startsWith('spikes') || s.id.startsWith('tar')) return 0.75;
   if (['lumber', 'miners', 'quarry', 'goldmine', 'crystal', 'marketup'].includes(s.id)) return 0.7;
   if (s.id.startsWith('r_') || s.id === 'academy') return 0.8;

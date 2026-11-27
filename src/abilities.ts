@@ -5,7 +5,7 @@ import { enemies, soldiers, rangers, type Enemy } from './units';
 import { repairFrac, wallFx } from './structures';
 import { Proj } from './projectiles';
 import { Stat, hasRelic } from './progress';
-import { burst, ring, text, flash } from './fx';
+import { burst, ring, text, slash, dust, spark, fire } from './fx';
 import { Sfx } from './audio';
 
 export type AbilityId = 'whirlwind' | 'warcry' | 'meteor' | 'bastion';
@@ -66,7 +66,8 @@ export function cast(a: AbilityId): boolean {
         if (e.alive && Math.hypot(e.x - hero.x, e.z - hero.z) < c.radius + e.r) heroStrike(e, c.mult);
       }
       ring(hero.x, hero.z, 0xffffff, c.radius, 0.35, 0.5);
-      burst(hero.x, 1, hero.z, 0xd5dce4, 16, { speed: 8, up: 1, size: 0.12, life: 0.3 });
+      for (let i = 0; i < 4; i++) slash(hero.x, 1.0, hero.z, (i / 4) * Math.PI * 2, 0xe8f4ff, c.radius * 0.9, 0.3, 1.6);
+      dust(hero.x, hero.z, 1.6);
       Sfx.play('whoosh');
       break;
     }
@@ -86,7 +87,8 @@ export function cast(a: AbilityId): boolean {
       const c = CFG.ability.meteor;
       const mult = c.mult * (hasRelic('shard') ? 1.5 : 1);
       Proj.meteor(t.x + t.vx * 0.9, t.z + t.vz * 0.9, Stat.heroDmg() * mult, c.radius);
-      flash(hero.x, 3, hero.z, 0xff8a2a, 2, 0.3);
+      spark(hero.x, 2.6, hero.z, 0xffb060, 1.6, 0.35);
+      fire(hero.x, 2.4, hero.z, { n: 3, spread: 0.2, size: 0.25, life: 0.35, up: 1.5, out: 0.6 });
       Sfx.play('fire');
       break;
     }

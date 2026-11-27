@@ -150,6 +150,12 @@ export const CFG = {
   ballista: { range: [22, 24, 26, 28], dmg: [60, 110, 180, 280], interval: [2.4, 2.1, 1.8, 1.5], hp: [600, 900, 1300, 1800] },
   fire: { range: [12, 13, 14, 15], dmg: [40, 70, 110, 170], splash: [2.4, 2.6, 2.8, 3], burn: [6, 10, 16, 25], interval: [2.0, 1.8, 1.6, 1.4], hp: [500, 800, 1200, 1700] },
   spire: { range: [9, 10, 11], heal: [8, 14, 22], repair: [0.005, 0.01, 0.015], smite: [50, 90, 150], interval: 2.5, hp: [700, 1000, 1500] },
+  /** Counter-siege: long range, hunts siege engines and ranged enemies first. */
+  cannon: { range: [30, 32, 34, 36], minRange: 6, dmg: [150, 270, 450, 700], interval: [3.0, 2.6, 2.2, 1.8], splash: [2.4, 2.7, 3.0, 3.4], hp: [900, 1300, 1800, 2500] },
+  /** Griffin riders: fly anywhere, dive on siege, ranged, flying and straggling enemies. */
+  aerie: { count: [2, 3, 4, 5], dmg: [55, 100, 170, 280], interval: 1.6, speed: 12, hp: [1000, 1500, 2100, 2800] },
+  /** A friendly dragon that strafes the densest enemies with fire. */
+  roost: { dmg: [70, 120, 200], burn: [25, 45, 80], breath: [1.6, 2.0, 2.5], cooldown: [6.5, 5.5, 4.5], width: 2.8, hp: [1800, 2600, 3600] },
   spikes: { dmg: [8, 15, 25, 40], interval: 0.6, radius: 2.2 },
   tar: { slow: [0.35, 0.45, 0.55], burn: [0, 0, 15], radius: 2.3 },
   ability: {
@@ -356,15 +362,18 @@ export const RELICS: Record<string, PerkDef> = {
 export function buildTime(nextWave: number, hourglass: boolean): number {
   const extra = hourglass ? 15 : 0;
   if (nextWave === 1) return 90;
-  if (nextWave % 5 === 0) return (nextWave >= 40 ? 65 : 60) + extra;
-  return (nextWave >= 40 ? 50 : 45) + extra;
+  // Late game: everything worth building is bought fast, so keep the rhythm brisk.
+  if (nextWave % 5 === 0) return (nextWave >= 70 ? 52 : nextWave >= 40 ? 58 : 60) + extra;
+  return (nextWave >= 70 ? 40 : nextWave >= 40 ? 45 : 45) + extra;
 }
 
 export const callEarlyBonus = (remaining: number, nextWave: number): number =>
   Math.max(1, Math.round(remaining * (0.6 + nextWave * 0.12)));
 export const waveClearBonus = (w: number): number => Math.round(15 + w * 8 + (w > 20 ? 0.12 * (w - 20) ** 2 : 0));
 export const spawnSpread = (w: number): number => Math.min(26, 4 + w * 3);
-export const spawnInterval = (w: number): number => Math.max(0.22, 1.15 - w * 0.04);
+export const spawnInterval = (w: number): number => Math.max(w > 40 ? 0.16 : 0.22, 1.15 - w * 0.04);
+/** Later acts march faster, so less of each wave is spent watching them walk. */
+export const marchScale = (w: number): number => 1 + Math.min(0.2, Math.max(0, w - 40) * 0.004);
 export const hpScale = (w: number): number => 1 + 0.12 * (w - 1) + (w > 20 ? 0.0045 * (w - 20) ** 2 : 0);
 export const bossScale = (w: number): number => 1 + 0.05 * (w - 1) + (w > 20 ? 0.0018 * (w - 20) ** 2 : 0);
 export const dmgScale = (w: number): number => 1 + 0.06 * (w - 1) + (w > 20 ? 0.015 * (w - 20) : 0);

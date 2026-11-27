@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { scene } from './engine';
-import { arrowGeo, boulderGeo, iceBoulderGeo, boltGeo, orbGeo, meteorGeo, makeMesh } from './models';
+import { arrowGeo, boulderGeo, iceBoulderGeo, boltGeo, orbGeo, meteorGeo, cannonballGeo, makeMesh } from './models';
 import type { Target } from './state';
 import { enemies, defenders, type Enemy } from './units';
 import { allStructures } from './structures';
-import { burst, flash, ring } from './fx';
+import { burst, flash, ring, puff, fire, boom, spark, dust } from './fx';
 import { Sfx } from './audio';
 import { aimPoint } from './util';
 import { G } from './state';
@@ -44,7 +44,7 @@ interface Lob {
   splash: number;
   enemy: boolean;
   burn: number;
-  kind: 'boulder' | 'fire' | 'ice';
+  kind: 'boulder' | 'fire' | 'ice' | 'cannon';
   trailT: number;
   arc: number;
 }
@@ -135,6 +135,13 @@ export const Proj = {
     lobs.push({ m, pool: 'f', fx: x, fy: y, fz: z, tx, ty, tz, k: 0, T, dmg, splash, enemy: false, burn, kind: 'fire', trailT: 0, arc: 4 });
   },
 
+  /** Cannonball: a fast, flat arc that explodes on impact. */
+  cannonball(x: number, y: number, z: number, tx: number, tz: number, dmg: number, splash: number, T: number): void {
+    const m = take('cb', () => makeMesh(cannonballGeo(), true, false));
+    m.position.set(x, y, z);
+    lobs.push({ m, pool: 'cb', fx: x, fy: y, fz: z, tx, ty: 0.3, tz, k: 0, T, dmg, splash, enemy: false, burn: 0, kind: 'cannon', trailT: 0, arc: 5 });
+  },
+
   /** Ballista bolt: flies straight and pierces everything in its path. */
   bolt(x: number, y: number, z: number, dx: number, dz: number, range: number, dmg: number, ty: number): void {
     const m = take('bolt', () => makeMesh(boltGeo(), false, false));
@@ -176,8 +183,9 @@ export const Proj = {
           a.t.damage(a.dmg, a.magic ? 'magic' : 'arrow');
           a.onHit?.(a.t);
           if (a.magic) {
-            flash(a.tx, a.ty, a.tz, a.color, 1.3, 0.2);
-            burst(a.tx, a.ty, a.tz, a.color, 5, { glow: true, speed: 3, up: 1.5, life: 0.35 });
+            spark(a.tx, a.ty, a.tz, a.color, 1.1, 0.3);
+            flash(a.tx, a.ty, a.tz, a.color, 0.9, 0.16);
+            burst(a.tx, a.ty, a.tz, a.color, 6, { glow: true, speed: 3.5, up: 1.5, life: 0.35 });
           }
         }
         give(a.pool, a.m);
@@ -194,7 +202,14 @@ export const Proj = {
           a.trailT = 0.035;
           burst(a.x, a.y, a.z, a.color, 1, { glow: true, speed: 0.3, up: 0.2, life: 0.3, size: 0.12, grav: 0 });
         }
-      } else a.m.lookAt(_look.set(a.tx, a.ty, a.tz));
+      } else {
+        a.m.lookAt(_look.set(a.tx, a.ty, a.tz));
+        a.trailT -= dt;
+        if (a.trailT <= 0 && !a.enemy) {
+          a.trailT = 0.05;
+          burst(a.x, a.y, a.z, 0xfff4d8, 1, { glow: true, speed: 0.1, up: 0, life: 0.18, size: 0.05, grav: 0 });
+        }
+      }
     }
 
     for (let i = lobs.length - 1; i >= 0; i--) {
@@ -210,12 +225,21 @@ export const Proj = {
       b.m.position.set(b.fx + (b.tx - b.fx) * k, b.fy + (b.ty - b.fy) * k + b.arc * k * (1 - k), b.fz + (b.tz - b.fz) * k);
       b.m.rotation.x += dt * 8;
       b.m.rotation.z += dt * 5;
-      if (b.kind !== 'boulder') {
-        b.trailT -= dt;
-        if (b.trailT <= 0) {
-          b.trailT = 0.03;
-          const p = b.m.position;
-          burst(p.x, p.y, p.z, b.kind === 'fire' ? 0xff8a2a : 0xbff4ff, 1, { glow: true, speed: 0.4, up: 0.4, life: 0.4, size: 0.18, grav: 0 });
+      b.trailT -= dt;
+      if (b.trailT <= 0) {
+        const p = b.m.position;
+        if (b.kind === 'fire') {
+          b.trailT = 0.035;
+          fire(p.x, p.y, p.z, { n: 1, spread: 0.1, size: 0.3, life: 0.35, up: 0.4, out: 0.2 });
+        } else if (b.kind === 'cannon') {
+          b.trailT = 0.04;
+          puff(p.x, p.y, p.z, 0xe8e4dc, { n: 1, spread: 0.05, size: 0.22, life: 0.5, up: 0.3, out: 0.1, grow: 0.6 });
+        } else if (b.kind === 'ice') {
+          b.trailT = 0.04;
+          burst(p.x, p.y, p.z, 0xbff4ff, 1, { glow: true, speed: 0.4, up: 0.4, life: 0.4, size: 0.18, grav: 0 });
+        } else {
+          b.trailT = 0.12;
+          puff(p.x, p.y, p.z, 0xd8ccb8, { n: 1, spread: 0.05, size: 0.13, life: 0.3, up: 0.2, out: 0.1, grow: 0.2 });
         }
       }
     }
@@ -234,7 +258,7 @@ export const Proj = {
         if (Math.hypot(e.x - b.x, e.z - b.z) < e.r + 0.55) {
           b.hit.add(e);
           e.damage(b.dmg, 'pierce');
-          burst(e.x, e.aimY, e.z, 0xffffff, 3, { speed: 3, up: 1, size: 0.08, life: 0.3 });
+          spark(e.x, e.aimY, e.z, 0xfff0c0, 1.0, 0.25);
         }
       }
       if (b.left <= 0) {
@@ -249,7 +273,9 @@ export const Proj = {
       const k = Math.min(1, m.t);
       m.m.position.set(m.x + (m.tx - m.x) * k, m.y + (0.5 - m.y) * k, m.z + (m.tz - m.z) * k);
       m.m.rotation.x += dt * 6;
-      if (Math.random() < 0.9) burst(m.m.position.x, m.m.position.y, m.m.position.z, 0xff8a2a, 2, { glow: true, speed: 1, up: 1, life: 0.5, size: 0.3, grav: 0 });
+      const mp = m.m.position;
+      fire(mp.x, mp.y, mp.z, { n: 2, spread: 0.4, size: 0.55, life: 0.4, up: 0.5, out: 0.4 });
+      if (Math.random() < 0.5) puff(mp.x, mp.y + 0.3, mp.z, 0x4a3e38, { n: 1, spread: 0.3, size: 0.5, life: 0.8, up: 0.6, out: 0.2, grow: 0.6 });
       if (m.t >= 1) {
         for (const e of enemies) {
           if (e.alive && Math.hypot(e.x - m.tx, e.z - m.tz) < m.splash + e.r) {
@@ -257,10 +283,8 @@ export const Proj = {
             e.burn(m.dmg * 0.05, 3);
           }
         }
-        burst(m.tx, 0.6, m.tz, 0xff8a2a, 34, { glow: true, speed: 10, up: 7, life: 0.8 });
-        burst(m.tx, 0.4, m.tz, 0x4a3020, 20, { speed: 8, up: 7, size: 0.3, life: 0.9 });
-        flash(m.tx, 1.5, m.tz, 0xffb060, m.splash * 3, 0.45);
-        ring(m.tx, m.tz, 0xff9a3a, m.splash * 1.6, 0.6);
+        boom(m.tx, 0.3, m.tz, m.splash * 1.1, { chunks: 18 });
+        ring(m.tx, m.tz, 0xffd27a, m.splash * 1.9, 0.7);
         G.shake = Math.min(0.9, G.shake + 0.5);
         Sfx.at('explode', m.tx, m.tz, 1.2);
         give('met', m.m);
@@ -289,15 +313,20 @@ function impact(b: Lob): void {
       }
     }
   }
-  if (b.kind === 'fire') {
-    burst(b.tx, b.ty + 0.3, b.tz, 0xff8a2a, 16, { glow: true, speed: 5, up: 3, life: 0.5 });
-    flash(b.tx, b.ty + 0.6, b.tz, 0xffa040, b.splash * 2, 0.3);
+  if (b.kind === 'cannon') {
+    boom(b.tx, 0.3, b.tz, b.splash * 0.85);
+    G.shake = Math.min(0.5, G.shake + 0.12);
+    Sfx.at('explode', b.tx, b.tz, 0.7);
+  } else if (b.kind === 'fire') {
+    fire(b.tx, b.ty + 0.2, b.tz, { n: 7, spread: b.splash * 0.4, size: 0.4, life: 0.5, up: 2, out: 2 });
+    puff(b.tx, b.ty + 0.5, b.tz, 0x4a4038, { n: 3, spread: b.splash * 0.4, size: 0.4, life: 0.8, up: 1.2, delay: 0.1 });
     ring(b.tx, b.tz, 0xff7a2a, b.splash, 0.4);
     Sfx.at('fire', b.tx, b.tz, 0.6);
   } else {
     const ice = b.kind === 'ice';
-    burst(b.tx, 0.4, b.tz, ice ? 0xbfe8f8 : 0x9a8a7a, 18, { speed: 6, up: 5, size: 0.22, life: 0.7 });
-    burst(b.tx, 0.4, b.tz, ice ? 0x8ac8e8 : 0x6b5a4a, 10, { speed: 4, up: 3, size: 0.3, life: 0.6 });
+    dust(b.tx, b.tz, 1.2 + b.splash * 0.3, ice ? 0xd8f0fa : 0xc8b898);
+    burst(b.tx, 0.4, b.tz, ice ? 0xbfe8f8 : 0x8a7a6a, 12, { speed: 6, up: 5, size: 0.2, life: 0.7 });
+    spark(b.tx, 0.8, b.tz, ice ? 0xbff4ff : 0xfff0c0, 1.1, 0.25);
     if (b.enemy) ring(b.tx, b.tz, ice ? 0x9fe8ff : 0xd8b080, b.splash * 1.2, 0.4);
     Sfx.at('boom', b.tx, b.tz, 0.8);
   }

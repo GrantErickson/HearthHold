@@ -4,13 +4,13 @@ import { G, type Research } from './state';
 import { CFG } from './config';
 import {
   Mat, wallGeo, towerGeo, smithGeo, barracksGeo, lumberGeo, lodgeGeo, catBaseGeo, rangeGeo, academyGeo,
-  frostTowerGeo, mageTowerGeo, ballistaBaseGeo, fireTowerGeo, spireGeo, spikesGeo, tarGeo,
+  frostTowerGeo, mageTowerGeo, ballistaBaseGeo, fireTowerGeo, spireGeo, spikesGeo, tarGeo, cannonBaseGeo, aerieGeo, roostGeo,
 } from './models';
 import * as St from './structures';
 import { Units } from './units';
 import { World, MINE_POS, QUARRY_SIGN_POS, type Rect } from './world';
 import { hero } from './hero';
-import { burst, fly, text } from './fx';
+import { burst, fly, text, puff, spark } from './fx';
 import { Sfx } from './audio';
 import { emit } from './events';
 import { easeOutBack } from './util';
@@ -135,6 +135,7 @@ function towerSlot(id: string, x: number, cost: number, req0: Req): void {
 
 const SPECIAL_GEO: Record<St.SpecialKind, (lv: number) => THREE.BufferGeometry> = {
   frost: frostTowerGeo, mage: mageTowerGeo, ballista: ballistaBaseGeo, fire: fireTowerGeo, spire: spireGeo,
+  cannon: cannonBaseGeo, aerie: aerieGeo, roost: roostGeo,
 };
 
 function specialSlot(id: string, kind: St.SpecialKind, x: number, stages: Omit<Stage, 'buy'>[]): void {
@@ -146,6 +147,20 @@ function specialSlot(id: string, kind: St.SpecialKind, x: number, stages: Omit<S
     ghost: { geo: () => SPECIAL_GEO[kind](1), x, z: FRONT_Z, hw: 1.3, hd: 1.3 },
     stages: stages.map((st, i) => ({ ...st, buy: mk(i + 1) })),
     rebuild: (s) => St.buildSpecial(s, kind, x, FRONT_Z, s.stage),
+  });
+}
+
+/** A defense that stands in the village rather than on the tower row. */
+function fieldSlot(id: string, kind: St.SpecialKind, x: number, z: number, pad: { x: number; z: number }, stages: Omit<Stage, 'buy'>[]): void {
+  const size = kind === 'roost' ? 2.3 : kind === 'aerie' ? 1.9 : 1.75;
+  const mk = (lv: number) => (s: Slot) => St.buildSpecial(s, kind, x, z, lv);
+  def({
+    id,
+    group: 'Towers',
+    pad,
+    ghost: { geo: () => SPECIAL_GEO[kind](1), x, z, hw: size, hd: size },
+    stages: stages.map((st, i) => ({ ...st, buy: mk(i + 1) })),
+    rebuild: (s) => St.buildSpecial(s, kind, x, z, s.stage),
   });
 }
 
@@ -244,6 +259,27 @@ export function initSlots(): void {
     { name: 'Holy Spire', icon: '✨', cost: 5000, req: { wave: 44 }, desc: 'Heals troops, mends walls, smites undead' },
     { name: 'Holy Spire Lv 2', icon: '✨', cost: 9000, req: { keep: 7 }, desc: 'Stronger blessings' },
     { name: 'Holy Spire Lv 3', icon: '✨', cost: 16000, req: { keep: 8 }, desc: 'Radiant' },
+  ]);
+
+  // Counter-siege: cannons out-range trebuchets; griffins and the dragon fly anywhere.
+  const cannonStages = (first: Req): Omit<Stage, 'buy'>[] => [
+    { name: 'Cannon Battery', icon: '💣', cost: 3500, req: first, desc: 'Huge range. Blasts siege engines and archers first' },
+    { name: 'Cannon Lv 2', icon: '💣', cost: 7500, req: { keep: 5 }, desc: 'Bigger shot, faster reload' },
+    { name: 'Bronze Cannon', icon: '💣', cost: 16000, req: { keep: 6 }, desc: 'Wider blast, longer range' },
+    { name: 'Runic Cannon', icon: '💣', cost: 34000, req: { keep: 7 }, desc: 'Devastating' },
+  ];
+  fieldSlot('cannon1', 'cannon', -4.8, -8.4, { x: -4.8, z: -5.0 }, cannonStages({ wave: 26, keep: 4 }));
+  fieldSlot('cannon2', 'cannon', 4.8, -8.4, { x: 4.8, z: -5.0 }, cannonStages({ wave: 33, keep: 4 }));
+  fieldSlot('aerie', 'aerie', 15.6, -6.0, { x: 11.4, z: -6.0 }, [
+    { name: 'Griffin Aerie', icon: '🦅', cost: 9000, req: { wave: 36, keep: 5 }, desc: '2 griffin riders hunt enemies anywhere on the field' },
+    { name: 'Aerie Lv 2', icon: '🦅', cost: 19000, req: { keep: 6 }, desc: '3 griffins, stronger dives' },
+    { name: 'Aerie Lv 3', icon: '🦅', cost: 38000, req: { keep: 7 }, desc: '4 griffins' },
+    { name: 'Aerie Lv 4', icon: '🦅', cost: 72000, req: { keep: 8 }, desc: '5 armored griffins' },
+  ]);
+  fieldSlot('roost', 'roost', -16.4, -6.6, { x: -11.6, z: -6.4 }, [
+    { name: 'Dragon Roost', icon: '🐉', cost: 45000, req: { wave: 56, keep: 7 }, desc: 'Your own dragon burns enemy columns' },
+    { name: 'Roost Lv 2', icon: '🐉', cost: 110000, req: { wave: 70, keep: 8 }, desc: 'Hotter, longer fire' },
+    { name: 'Roost Lv 3', icon: '🐉', cost: 240000, req: { wave: 84, keep: 8 }, desc: 'Ancient dragon' },
   ]);
 
   trapSlot('spikes1', 'spikes', -15, { wave: 5 });
@@ -766,7 +802,11 @@ function complete(s: Slot): void {
   hideView(s);
   G.stats.built++;
   burst(s.pad.x, 0.4, s.pad.z, 0xffd54a, 22, { speed: 5, up: 6, size: 0.16, life: 0.8 });
-  burst(s.pad.x, 0.2, s.pad.z, 0xffffff, 12, { speed: 4, up: 2, size: 0.2, life: 0.6 });
+  const bx = s.ghost?.x ?? s.pad.x;
+  const bz = s.ghost?.z ?? s.pad.z;
+  const big = s.ghost ? Math.max(s.ghost.hw, s.ghost.hd) : 1;
+  puff(bx, 0.3, bz, 0xf2ead8, { n: Math.round(6 + big * 2), spread: big * 0.9, size: 0.45, life: 0.8, up: 1.2, out: 2.4, grow: 0.5 });
+  for (let i = 0; i < 3; i++) spark(bx + (Math.random() - 0.5) * big * 1.6, 1 + Math.random() * 2.5, bz + (Math.random() - 0.5) * big * 1.6, 0xffe27a, 1.2, 0.4);
   Sfx.play('build');
   text(s.pad.x, 2.6, s.pad.z, label, 'gold big', 1.4);
   emit('purchase', s);
