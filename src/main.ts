@@ -1,3 +1,4 @@
+import '@fontsource/lilita-one';
 import './style.css';
 import * as THREE from 'three';
 import { scene, camera, engine } from './engine';
@@ -27,6 +28,7 @@ import { updateThreats, renderThreats, Danger, tunnels } from './threats';
 import { updateCamps, camps, Camp } from './camps';
 import { cast } from './abilities';
 import { pendingChoices } from './progress';
+import { initNative } from './native';
 import { initDebugKeys, runAutotest, runPreset, jumpTo, refreshDevBar, JUMP_BASES, type JumpBase } from './debug';
 
 const BOOT_KEY = 'hearthold-boot';
@@ -361,6 +363,16 @@ function boot(): void {
     cycleSpeed,
     jump: devTools ? startAt : undefined,
   });
+  void initNative({
+    pause,
+    back: () => {
+      if (!inGame()) return false;
+      if (UI.choosing) UI.closeChoices();
+      else if (!G.paused) pause();
+      else if (UI.screen === 'pause') resume();
+      return true;
+    },
+  });
   Input.init(renderer.domElement);
   Input.onKey((e) => {
     if (e.repeat) return;
@@ -393,6 +405,8 @@ function boot(): void {
   window.addEventListener('keydown', unlockAudio, { once: true });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pause();
+    // No drums from a phone in your pocket.
+    Sfx.setActive(!document.hidden);
   });
   document.fonts?.load('46px "Lilita One"').then(redrawPadText).catch(() => undefined);
 

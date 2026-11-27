@@ -35,7 +35,7 @@ The full design is in [SPEC.md](SPEC.md).
 
 ## Run it
 
-Requires Node 18+.
+Requires Node 22+.
 
 ```sh
 npm install
@@ -58,6 +58,16 @@ sub-folder. The built page has to be served over http(s); opening
 
 The site is published at <https://granterickson.github.io/HearthHold/>. Every
 push to `main` builds and deploys the site through GitHub Actions.
+
+## iPhone, iPad and Android
+
+The same game ships as a native app through Capacitor 8, built and signed by
+Capawesome Cloud (no Mac or Android Studio needed). App id
+`net.micapeak.Hearthold`. The native projects are `ios/` and `android/`;
+`npm run app:sync` builds the game and copies it in. In the app the status bar
+is hidden, the screen stays on, the game pauses when you switch away, and
+Android's back button pauses. Setup, signing, version numbers and publishing:
+[docs/native-app-capawesome.md](docs/native-app-capawesome.md).
 
 ## Controls
 
@@ -95,6 +105,10 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                    |
 | `src/ui.ts`, `src/style.css`, `index.html`       | HUD, ability bar, perk picker and menus                                   |
 | `src/debug.ts`                                   | Debug cheats and the autotest bot (see SPEC §13)                          |
+| `src/native.ts`                                  | App-only glue: status bar, keep awake, pause in background, back button   |
+| `ios/`, `android/`, `capacitor.config.json`       | The native app projects (Capacitor 8)                                     |
+| `capawesome.config.json`, `scripts/app-version.mjs` | Capawesome Cloud build commands; writes version and build numbers      |
+| `resources/`                                     | App icon and splash (drawn in `keep.svg`)                                 |
 
 ## Testing
 

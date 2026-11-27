@@ -1,0 +1,33 @@
+{
+  "appId": "net.micapeak.Hearthold",
+  "appName": "Hearthold",
+  "webDir": "dist",
+  "backgroundColor": "#1f3a2b",
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK"
+    },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 600,
+      "backgroundColor": "#1f3a2b",
+      "androidScaleType": "CENTER_CROP",
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  },
+  "ios": {
+    "contentInset": "never"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "experimental": {
+    "ios": {
+      "spm": {
+        "swiftToolsVersion": "6.1"
+      }
+    }
+  }
+}

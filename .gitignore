@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Store signing stays in Capawesome Cloud. Never commit a keystore, a certificate or a provisioning profile.
+*.keystore
+*.jks
+*.p12
+*.mobileprovision
+private.pem
