@@ -8,7 +8,7 @@ import { Env } from './env';
 import * as St from './structures';
 import { initSlots, reservedRects, makeStaticPad, updatePads, refreshPads, redrawPadText } from './pads';
 import { heroInit, heroUpdate, hero, maxHp } from './hero';
-import { Units } from './units';
+import { Units, enemies } from './units';
 import { Proj } from './projectiles';
 import { Waves } from './waves';
 import { updateFX, updateTexts, burst, clearTexts, renderFX, warmFX, fxSampleMaterials, boom, erupt, shatter, warnCircle } from './fx';
@@ -24,6 +24,7 @@ import { initHappenings, updateHappenings } from './happenings';
 import { Post } from './post';
 import { updateAllies, alliesInfo } from './allies';
 import { updateThreats, renderThreats, Danger, tunnels } from './threats';
+import { updateCamps, camps, Camp } from './camps';
 import { cast } from './abilities';
 import { pendingChoices } from './progress';
 import { initDebugKeys, runAutotest, runPreset, jumpTo, refreshDevBar, JUMP_BASES, type JumpBase } from './debug';
@@ -49,6 +50,7 @@ function step(dt: number): void {
   World.update(dt, G.time);
   St.updateStructures(dt);
   Units.update(dt);
+  updateCamps(dt);
   updateAllies(dt);
   Proj.update(dt);
   updatePads(dt);
@@ -217,7 +219,7 @@ function enableDebug(): void {
   debugOn = true;
   initDebugKeys();
   window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
-  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine, alliesInfo, Proj, Sfx, Danger, tunnels, cast, fx: { boom, erupt, shatter, warnCircle } };
+  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, enemies, Waves, engine, alliesInfo, Proj, Sfx, Danger, tunnels, camps, Camp, cast, fx: { boom, erupt, shatter, warnCircle } };
 }
 
 /** Test builds: start at a later wave with a base built from a typical run's income. */

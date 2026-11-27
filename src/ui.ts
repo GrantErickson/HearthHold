@@ -6,6 +6,7 @@ import { hero, capacity, maxHp, respawnIn, heroHurt } from './hero';
 import { Danger } from './threats';
 import { S } from './structures';
 import { Units } from './units';
+import { camps } from './camps';
 import { Waves, type WaveClearInfo } from './waves';
 import { makeMarker, makePointer } from './models';
 import { clamp, fmtTime } from './util';
@@ -243,7 +244,7 @@ export const UI = {
       'waveCard', 'waveAct', 'waveTitle', 'waveSub', 'waveMod', 'waveBar', 'callBtn', 'keepCard', 'keepBar', 'bossCard', 'bossName', 'bossBar', 'bossShield',
       'speedBtn', 'pauseBtn', 'muteBtn', 'abilities', 'banner', 'bannerTitle', 'bannerSub', 'toast', 'btnContinue', 'btnPlay', 'btnHow', 'how', 'btnResume',
       'btnRestart', 'btnMenu', 'btnMute2', 'heroSheet', 'overTitle', 'overStats', 'btnRetry', 'btnNew2', 'winStats', 'btnEndless', 'btnNew3', 'fatalMsg',
-      'chooseCrest', 'chooseTitle', 'chooseSub', 'chooseCards', 'btnLater', 'vignette', 'btnMusic',
+      'chooseCrest', 'chooseTitle', 'chooseSub', 'chooseCards', 'btnLater', 'vignette', 'btnMusic', 'campList',
     ];
     els = {};
     for (const id of ids) els[id] = $(id);
@@ -531,6 +532,11 @@ export const UI = {
     if (G.speed > 1) buffs.push(`⏩ ${G.speed}× speed`);
     setText(els.buffs, buffs.join('   '));
     els.buffs.hidden = !buffs.length;
+    // Enemy camps out on the field and what they're doing to you.
+    let cl = '';
+    for (const c of camps) if (c.alive) cl += `${cl ? '\n' : ''}${c.def.icon} ${c.def.name}: ${c.up ? c.def.desc : 'going up…'}`;
+    setText(els.campList, cl);
+    els.campList.hidden = !cl;
 
     for (const a of ABILITIES) {
       const e = abilityEls.get(a);

@@ -69,7 +69,7 @@ export const G = {
   up: { sword: 0, armor: 0, boots: 0, tools: 0, backpack: 0 } as Upgrades,
   research: { fletching: 0, masonry: 0, drill: 0, commerce: 0, alchemy: 0, logistics: 0, glory: 0 } as Research,
   flags: {} as Record<string, boolean>,
-  stats: { kills: 0, earned: 0, built: 0, bosses: 0, chests: 0 },
+  stats: { kills: 0, earned: 0, built: 0, bosses: 0, chests: 0, camps: 0 },
   /** Hero progression. */
   level: 1,
   xp: 0,

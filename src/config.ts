@@ -148,7 +148,8 @@ export const CFG = {
     engage: 7.5,
     r: 0.4,
   },
-  ranger: { hp: [70, 95, 125, 170], dmg: [8, 12, 18, 26], cap: [2, 3, 4, 6], range: 9, interval: 1.1, train: 7, r: 0.38 },
+  /** Archers stand on stone walls (level 2+): extra range from the height, and melee can't reach them. */
+  ranger: { hp: [70, 95, 125, 170], dmg: [8, 12, 18, 26], cap: [2, 3, 4, 6], range: 9, wallRange: 3, interval: 1.1, train: 7, r: 0.38 },
   frost: { range: [10, 11, 12], aura: [6, 7, 8], dmg: [8, 14, 22], slow: [0.3, 0.4, 0.5], interval: [1.2, 1.1, 1.0], hp: [500, 800, 1200] },
   mage: { range: [13, 14, 15, 16], dmg: [30, 55, 90, 140], jumps: [3, 4, 5, 6], interval: [1.6, 1.4, 1.2, 1.0], hp: [500, 800, 1200, 1700] },
   ballista: { range: [22, 24, 26, 28], dmg: [60, 110, 180, 280], interval: [2.4, 2.1, 1.8, 1.5], hp: [600, 900, 1300, 1800] },
@@ -309,6 +310,48 @@ export const AFFIXES: Record<string, AffixDef> = {
 };
 /** Affixes that need a later wave before they can roll. */
 export const AFFIX_FROM: Record<string, number> = { warded: 45 };
+
+// ───────────────────────────── Enemy camps ─────────────────────────────
+
+export type CampKind = 'drums' | 'workshop' | 'warren' | 'totem';
+export interface CampDef {
+  name: string;
+  icon: string;
+  /** What it does while it stands (HUD). */
+  desc: string;
+  from: number;
+}
+/** War camps pitched on the far field from Act II. Only the hero and his soldiers can tear them down. */
+export const CAMPS: Record<CampKind, CampDef> = {
+  drums: { name: 'War Drums', icon: '🥁', desc: 'enemies faster and stronger', from: 21 },
+  workshop: { name: 'Siege Workshop', icon: '🪓', desc: 'builds battering rams', from: 24 },
+  warren: { name: 'Goblin Warren', icon: '💰', desc: 'sends thieves for your coins', from: 30 },
+  totem: { name: 'Shaman Totem', icon: '🗿', desc: 'enemies regenerate', from: 35 },
+};
+export const CAMP = {
+  /** × hpScale(wave). */
+  hp: 420,
+  r: 2.0,
+  /** Seconds to raise a new camp (no effect until it's up). */
+  build: 6,
+  /** Guards per camp by act (I–V). */
+  guards: [0, 3, 4, 5, 6],
+  /** Coins for razing one, × the wave clear bonus. */
+  coins: 0.5,
+  drums: { speed: 1.25, dmg: 1.2 },
+  totem: { regen: 0.015 },
+  /** Rams (later trebuchets) per wave, and seconds between them. */
+  workshop: { n: 3, every: 20 },
+  warren: { n: 3, every: 18 },
+};
+/** New camps pitched at the start of wave `w`, and how many may stand at once. */
+export function campPlan(w: number): { add: number; cap: number } {
+  if (w < 21 || w % 10 === 0) return { add: 0, cap: 0 };
+  if (w <= 40) return { add: w % 2 ? 1 : 0, cap: 2 };
+  if (w <= 60) return { add: 1, cap: 3 };
+  return { add: w % 3 === 0 ? 2 : 1, cap: 4 };
+}
+
 export const eliteChance = (w: number): number => (w < 25 ? 0 : Math.min(0.3, 0.04 + (w - 25) * 0.0035));
 
 // ───────────────────────────── Progression ─────────────────────────────

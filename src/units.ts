@@ -4,7 +4,7 @@ import {
   CFG, AFFIXES, MODS, hpScale, bossScale, dmgScale, coinScale, xpScale, marchScale, type EnemyDef,
 } from './config';
 import { G, type DamageKind, type EnemyType, type ResType, type Target } from './state';
-import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, U, type UnitModel } from './models';
+import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, U, wallTopY, type UnitModel } from './models';
 import * as St from './structures';
 import { hero, heroSlow, heroStun } from './hero';
 import { World, type ResNode } from './world';
@@ -14,6 +14,7 @@ import { Proj } from './projectiles';
 import { Stat, gainXp } from './progress';
 import { emit } from './events';
 import { aimPoint, angleLerp, clamp, surfDist } from './util';
+import { CampFx, campNear, type Camp } from './camps';
 
 const MAP = CFG.map;
 const W = MAP.wallZ;
@@ -112,6 +113,9 @@ const wardMat = new THREE.ShaderMaterial({
   depthWrite: false,
 });
 export const wardMaterial = (): THREE.Material => wardMat;
+
+/** Seconds before an elite's ward fades by itself (bosses keep theirs). */
+const WARD_FADE = 45;
 
 /** Seconds a climber needs to get over a wall. */
 const CLIMB_TIME = { scaler: 1.5, thief: 1.0 } as Record<string, number>;
@@ -215,9 +219,16 @@ export class Enemy implements Target {
   ward: THREE.Mesh | null = null;
   /** Takes extra damage after its ward was shattered. */
   vulnT = 0;
+  /** Seconds the current ward has held (an elite's fades in the end; a boss's never does). */
+  wardT = 0;
   /** Boss slam wind-up. */
   slamWind = 0;
   stepT = 0;
+  /** Camp guard: holds this spot and only fights whoever comes close. */
+  guard: Target | null = null;
+  guardSlot = -1;
+  /** Fled when its camp fell: runs off the north edge. */
+  routed = false;
 
   constructor(type: EnemyType, x: number, z: number, wave: number, o: SpawnOpts = {}) {
     this.type = type;
@@ -294,9 +305,29 @@ export class Enemy implements Target {
     return this.d.name;
   }
 
+  /** Counts toward clearing the wave (camp guards and routed enemies don't). */
+  get hostile(): boolean {
+    return this.alive && !this.guard && !this.routed;
+  }
+
+  setGuard(x: number, z: number): void {
+    this.guard = point(x, z);
+  }
+
+  /** The camp fell: run for the hills. */
+  rout(): void {
+    this.guard = null;
+    this.routed = true;
+    this.goal = point(clamp(this.x + (Math.random() - 0.5) * 10, MAP.minX + 2, MAP.maxX - 2), MAP.spawnZ - 3);
+    this.speed *= 1.25;
+    this.retargetT = 0;
+    if (Math.random() < 0.5) text(this.x, 2.4 * this.scale, this.z, 'Run!', 'xp', 0.9);
+  }
+
   /** Throw up a ward that only the hero can break. */
   raiseWard(hits: number, announce = true): void {
     this.wardHits = this.wardMax = hits;
+    this.wardT = 0;
     if (!G.autotest) {
       if (!this.ward) {
         this.ward = new THREE.Mesh(wardGeo, wardMat);
@@ -481,6 +512,26 @@ export class Enemy implements Target {
   /** Units that enemies can fight. */
   private pickTarget(): void {
     const d = this.d;
+    if (this.routed && this.goal) {
+      this.target = this.goal;
+      return;
+    }
+    if (this.guard) {
+      // Guard the camp: chase off whoever comes near, otherwise hold the post.
+      const g = this.guard;
+      let best: Target | null = null;
+      let bd = d.ranged ? d.range + 2 : 9;
+      for (const t of defenders()) {
+        if (!t.alive || Math.hypot(t.x - g.x, t.z - g.z) > 10) continue;
+        const dist = surfDist(this.x, this.z, this.r, t);
+        if (dist < bd) {
+          bd = dist;
+          best = t;
+        }
+      }
+      this.target = best ?? g;
+      return;
+    }
     if (d.thief && this.goal) {
       if (this.fleeing) {
         this.goal.x = clamp(this.goal.x, MAP.minX + 2, MAP.maxX - 2);
@@ -734,8 +785,22 @@ export class Enemy implements Target {
     if (this.slowT > 0) this.slowT -= dt;
     if (this.flashCd > 0) this.flashCd -= dt;
     if (this.vulnT > 0) this.vulnT -= dt;
+    if (CampFx.regen > 0 && this.burnT <= 0 && this.hp < this.maxHp && !d.siege) {
+      // The shaman totem knits them back together.
+      this.hp = Math.min(this.maxHp, this.hp + this.maxHp * CampFx.regen * dt);
+      if (!G.autotest && Math.random() < dt * 0.5) burst(this.x, 1.3 * this.scale + this.flyH, this.z, 0x7dff8a, 1, { glow: true, speed: 0.6, up: 2, life: 0.6 });
+    }
     updateLook(this.m, dt, this.stunT > 0 || this.slowT > 0 ? 'chill' : this.burnT > 0 ? 'burn' : this.vulnT > 0 ? 'holy' : null, G.time);
     if (this.ward?.visible) this.ward.rotation.y += dt * 0.8;
+    if (this.wardHits > 0 && !this.isBoss) {
+      this.wardT += dt;
+      if (this.wardT > WARD_FADE) {
+        // Left alone long enough, an elite's ward gives out on its own.
+        this.wardHits = 0;
+        if (this.ward) this.ward.visible = false;
+        if (!G.autotest) burst(this.x, 1.2 * Math.min(2.4, this.scale), this.z, 0xc8a8ff, 8, { glow: true, speed: 2, up: 2 });
+      }
+    }
     if (this.emergeT > 0) {
       // Clawing up out of a tunnel.
       this.emergeT -= dt;
@@ -830,8 +895,20 @@ export class Enemy implements Target {
       this.escape();
       return;
     }
+    if (this.routed && this.z < MAP.spawnZ + 2) {
+      this.alive = false;
+      this.removed = true;
+      this.bar.hide();
+      return;
+    }
     if (moveTo) {
       this.moveToward(moveTo[0], moveTo[1], dt);
+    } else if (this.routed) {
+      // Running for it (archers too: don't stop at bow range from the escape point).
+      this.moveToward(tgt.x, tgt.z, dt);
+    } else if (this.guard && tgt === this.guard) {
+      if (Math.hypot(tgt.x - this.x, tgt.z - this.z) > 0.6) this.moveToward(tgt.x, tgt.z, dt);
+      else this.facing = angleLerp(this.facing, 0, Math.min(1, dt * 4));
     } else if (surfDist(this.x, this.z, this.r, tgt) <= reach) {
       if (d.thief) this.steal();
       else this.attack(tgt);
@@ -922,7 +999,7 @@ export class Enemy implements Target {
   }
 
   private curSpeed(): number {
-    let s = this.speed;
+    let s = this.speed * CampFx.speed;
     if (this.slowT > 0) s *= 1 - this.slowAmt;
     if (this.chargeT > 0) s *= 3;
     return s;
@@ -972,6 +1049,8 @@ export class Enemy implements Target {
     }
     this.atkT = this.interval;
     this.swingT = 0;
+    // War drums on the field make every blow land harder.
+    const dmg = this.dmg * CampFx.dmg;
     if (d.ranged || d.breath) {
       const ty = t.isStruct ? 1.4 : (t.aimY ?? 1.1);
       const sy = (this.flyH || 1.5 * this.scale) + (this.flying ? 0.3 : 0);
@@ -982,13 +1061,13 @@ export class Enemy implements Target {
         beam(this.x, sy, this.z, ax, ty, az, 0xff7a1a, big ? 0.6 : 0.3, 0.35);
         beam(this.x, sy, this.z, ax, ty, az, 0xffe27a, big ? 0.25 : 0.12, 0.3);
         burst(ax, ty, az, 0xff8a2a, big ? 14 : 6, { glow: true, speed: 3, up: 2, life: 0.5 });
-        t.damage(this.dmg, 'fire', this);
-        if (big) splashDefenders(ax, az, 2.5, this.dmg * 0.4);
+        t.damage(dmg, 'fire', this);
+        if (big) splashDefenders(ax, az, 2.5, dmg * 0.4);
         Sfx.at('fire', this.x, this.z, 0.7);
       } else if (d.magic) {
         const col = this.type === 'frostmage' || this.type === 'witch' ? 0x9fe8ff : this.type === 'shaman' ? 0x9aff7a : this.type === 'lich' ? 0x7dff9a : 0xb08aff;
         const slow = d.slowOnHit ?? 0;
-        Proj.magic(this.x, sy, this.z, t, this.dmg, col, true, (hit) => {
+        Proj.magic(this.x, sy, this.z, t, dmg, col, true, (hit) => {
           if (!slow) return;
           if (hit === hero) heroSlow(slow, 2);
           else if (hit.isStruct) (hit as St.Structure).freeze(1.2);
@@ -996,14 +1075,14 @@ export class Enemy implements Target {
         });
         Sfx.at('magic', this.x, this.z, 0.4);
       } else {
-        Proj.arrow(this.x, sy, this.z, t, this.dmg, true);
+        Proj.arrow(this.x, sy, this.z, t, dmg, true);
         Sfx.at('arrow', this.x, this.z, 0.5);
       }
       return;
     }
     const isWall = t.isStruct && (t as St.Structure).kind === 'wall';
     const mul = t.isStruct && (isWall || d.siege) ? d.wallMul ?? 1 : 1;
-    const dealt = this.dmg * mul;
+    const dealt = dmg * mul;
     t.damage(dealt, 'melee', this);
     if (isWall) {
       const th = CFG.wall.thorns[(t as St.Structure).level - 1] ?? 0;
@@ -1073,7 +1152,42 @@ function summonAround(e: Enemy, type: EnemyType, n: number): void {
 // ───────────────────────────── Soldiers & rangers ─────────────────────────────
 
 const POSTS = [-3, 3, -9, 9, -15, 15, -21, 21, -27, 27, -6, 6].map((x) => ({ x, z: W + 1.05 }));
-const RANGER_POSTS = [-2.5, 2.5, -6.5, 6.5, -11.5, 11.5].map((x) => ({ x, z: W + 2.4 }));
+/** Archers' places along the wall walk (or behind a palisade, which has none). */
+const RANGER_POSTS = [-3, 3, -8, 8, -14, 14].map((x) => ({ x, z: W + 2.4 }));
+/** Where archers stand on top of a stone wall. */
+const WALK_Z = W + 0.3;
+
+/** How high a unit is lifted while it's crossing a standing wall (it hops over). */
+function hopY(x: number, z: number, r: number): number {
+  const band = MAP.wallHalf + r * 0.5 + 0.1;
+  const d = Math.abs(z - W);
+  if (d >= band) return 0;
+  const seg = St.S.walls[St.segIndex(x)];
+  if (!seg || !seg.alive) return 0;
+  const H = seg.level >= 2 ? wallTopY(seg.level) : 2.4;
+  return H * Math.min(1, (1 - d / band) * 1.8);
+}
+export { hopY as wallHop };
+
+/**
+ * The garrison follows the hero out past the wall and comes home when he does.
+ * No orders to give: where the hero goes, the soldiers go.
+ */
+export const Sally = { active: false, cool: 0 };
+
+function updateSally(dt: number): void {
+  if (Sally.cool > 0) Sally.cool -= dt;
+  const inGame = G.phase === 'wave' || G.phase === 'build';
+  if (!Sally.active) {
+    if (inGame && hero.alive && hero.z < W - 1.6) {
+      Sally.active = true;
+      if (soldiers.some((s) => s.alive) && Sally.cool <= 0) {
+        Sally.cool = 14;
+        emit('threat', { kind: 'sally' });
+      }
+    }
+  } else if (!inGame || !hero.alive || hero.z > W + 0.8) Sally.active = false;
+}
 
 export class Soldier implements Target {
   readonly isStruct = false;
@@ -1085,11 +1199,16 @@ export class Soldier implements Target {
   removed = false;
   x: number;
   z: number;
+  /** Height above the ground (archers on the wall walk; soldiers hopping the wall). */
+  y = 0;
+  vy = 0;
   hp = 1;
   maxHp = 1;
   dmg = 1;
   post: { x: number; z: number };
-  target: Enemy | null = null;
+  /** Place in the escort ring while following the hero. */
+  slot = 0;
+  target: Enemy | Camp | null = null;
   atkT = 0;
   retargetT = 0;
   swingT = 1;
@@ -1116,6 +1235,10 @@ export class Soldier implements Target {
     this.m.group.position.set(this.x, 0, this.z);
     if (!G.autotest) scene.add(this.m.group);
     this.bar = new Bar(0.9, 0x5fd35f, 0.12);
+  }
+
+  get aimY(): number {
+    return this.y + 1.1;
   }
 
   refreshStats(): void {
@@ -1150,20 +1273,51 @@ export class Soldier implements Target {
     if (this.alive) this.hp = Math.min(this.maxHp, this.hp + n);
   }
 
-  private findTarget(): Enemy | null {
-    let best: Enemy | null = null;
+  /** An archer's spot: up on a stone wall, or on the ground behind a palisade or a gap. */
+  private stand(): { x: number; z: number; y: number } {
+    const seg = St.S.walls[St.segIndex(this.post.x)];
+    if (seg && seg.alive && seg.level >= 2) return { x: this.post.x, z: WALK_Z, y: wallTopY(seg.level) };
+    return { x: this.post.x, z: this.post.z, y: 0 };
+  }
+
+  private findTarget(onWall: boolean): Enemy | Camp | null {
+    let best: Enemy | Camp | null = null;
     let bd = Infinity;
-    const range = this.ranged ? CFG.ranger.range : 0;
-    for (const e of enemies) {
-      if (!e.alive) continue;
-      const ds = Math.hypot(e.x - this.x, e.z - this.z);
-      if (this.ranged) {
+    if (this.ranged) {
+      // Archers pick off whoever is climbing the wall first.
+      const range = CFG.ranger.range + (onWall ? CFG.ranger.wallRange : 0);
+      for (const e of enemies) {
+        if (!e.alive || e.emergeT > 0) continue;
+        const ds = Math.hypot(e.x - this.x, e.z - this.z);
         if (ds > range) continue;
-      } else {
-        if (e.flying) continue;
-        const dp = Math.hypot(e.x - this.post.x, e.z - this.post.z);
-        if (dp > CFG.soldier.engage && ds > 3.5) continue;
+        const s = ds - (e.climbT > 0 || (e.d.climber && Math.abs(e.z - W) < 3) ? 8 : 0);
+        if (s < bd) {
+          bd = s;
+          best = e;
+        }
       }
+      return best;
+    }
+    if (Sally.active) {
+      // Out with the hero: fight whatever is around him, then tear down the camp.
+      for (const e of enemies) {
+        if (!e.alive || e.flying || e.emergeT > 0 || e.climbT > 0) continue;
+        const ds = Math.hypot(e.x - this.x, e.z - this.z);
+        if (ds > 2.5 && Math.hypot(e.x - hero.x, e.z - hero.z) > 8) continue;
+        if (ds < bd) {
+          bd = ds;
+          best = e;
+        }
+      }
+      return best ?? campNear(hero.x, hero.z, 7);
+    }
+    for (const e of enemies) {
+      if (!e.alive || e.flying) continue;
+      const ds = Math.hypot(e.x - this.x, e.z - this.z);
+      const dp = Math.hypot(e.x - this.post.x, e.z - this.post.z);
+      if (dp > CFG.soldier.engage && ds > 3.5) continue;
+      // Behind a standing wall they can only reach the ones hammering at it.
+      if (e.z < W - MAP.wallHalf - e.r - 0.3 && St.wallBetween(this.x, this.z, e.x, e.z)) continue;
       if (ds < bd) {
         bd = ds;
         best = e;
@@ -1172,7 +1326,7 @@ export class Soldier implements Target {
     return best;
   }
 
-  private moveToward(tx: number, tz: number, dt: number): void {
+  private moveToward(tx: number, tz: number, dt: number, fast = false): void {
     let dx = tx - this.x;
     let dz = tz - this.z;
     const L = Math.hypot(dx, dz);
@@ -1180,66 +1334,143 @@ export class Soldier implements Target {
     dx /= L;
     dz /= L;
     [dx, dz] = St.steer(this.x, this.z, dx, dz, this.r);
-    const sp = CFG.soldier.speed * (this.slowT > 0 ? 1 - this.slowAmt : 1);
+    let sp = CFG.soldier.speed;
+    // Running to catch up with the hero.
+    if (fast) sp = Math.max(sp, Stat.heroSpeed() * 0.92);
+    sp *= this.slowT > 0 ? 1 - this.slowAmt : 1;
     const step = Math.min(L, sp * dt);
+    const oz = this.z;
     this.x += dx * step;
     this.z += dz * step;
+    // Unless they're following the hero out, the garrison stays behind a standing wall.
+    if (!this.ranged && !Sally.active) {
+      const south = W + MAP.wallHalf + this.r;
+      if (oz >= south - 0.01 && this.z < south && St.segAlive(St.segIndex(this.x))) this.z = south;
+    }
     St.pushOut(this, this.r);
     this.facing = angleLerp(this.facing, Math.atan2(dx, dz), Math.min(1, dt * 10));
     this.moving = true;
+  }
+
+  /** Archers: up the ladder onto the wall walk, or tumbling off when the wall falls. Returns true while busy. */
+  private climb(dt: number, spot: { x: number; z: number; y: number }): boolean {
+    if (this.y > spot.y + 0.05) {
+      // The wall went down under them.
+      this.vy -= 22 * dt;
+      this.y = Math.max(spot.y, this.y + this.vy * dt);
+      this.z += (W + 1.6 - this.z) * Math.min(1, dt * 5);
+      this.m.group.rotation.x = Math.min(0.9, this.m.group.rotation.x + dt * 3);
+      if (this.y <= spot.y) {
+        const fall = Math.max(1, -this.vy * 0.25);
+        this.vy = 0;
+        this.m.group.rotation.x = 0;
+        if (!G.autotest) {
+          dust(this.x, this.z, 0.6);
+          text(this.x, 2.2, this.z, 'Knocked off the wall!', 'red', 1.1);
+        }
+        this.damage(this.maxHp * 0.12 * fall, 'melee');
+      }
+      return true;
+    }
+    if (spot.y > 0 && this.y < spot.y) {
+      // Walk to the foot of the wall, then up the ladder.
+      const footZ = W + 1.25;
+      if (this.y <= 0 && Math.hypot(this.x - spot.x, this.z - footZ) > 0.25) {
+        this.moveToward(spot.x, footZ, dt);
+        return true;
+      }
+      this.y = Math.min(spot.y, this.y + dt * 5);
+      this.z += (spot.z - this.z) * Math.min(1, dt * 6);
+      this.x += (spot.x - this.x) * Math.min(1, dt * 6);
+      this.facing = angleLerp(this.facing, Math.PI, Math.min(1, dt * 10));
+      this.moving = true;
+      return true;
+    }
+    if (spot.y > 0) this.y = spot.y;
+    return false;
   }
 
   update(dt: number): void {
     if (!this.alive) {
       this.deathT += dt;
       if (cartoonDeath(this.m, this.deathT, this.x, this.z, 1, 0xe8eef8)) this.removed = true;
+      this.m.group.position.y = Math.max(this.m.group.position.y, this.y);
       return;
     }
     if (this.slowT > 0) this.slowT -= dt;
     updateLook(this.m, dt, this.slowT > 0 || this.stunT > 0 ? 'chill' : null, G.time);
     this.moving = false;
-    if (this.stunT > 0) {
+    const spot = this.ranged ? this.stand() : null;
+    if (this.stunT > 0 && !(spot && this.y > spot.y + 0.05)) {
       this.stunT -= dt;
-      this.bar.set(this.hp / this.maxHp, this.x, 2.4, this.z);
+      this.place(0);
       return;
     }
     this.atkT -= dt;
     this.retargetT -= dt;
     this.swingT += dt / 0.3;
+    if (spot && this.climb(dt, spot)) {
+      this.place(dt);
+      return;
+    }
+    const onWall = !!spot && spot.y > 0;
     if (this.retargetT <= 0 || (this.target && !this.target.alive)) {
       this.retargetT = 0.3;
-      this.target = this.findTarget();
+      this.target = this.findTarget(onWall);
     }
-    const t = this.target;
     const haste = Stat.haste();
-    if (t && this.ranged) {
-      if (Math.hypot(this.post.x - this.x, this.post.z - this.z) > 0.3) this.moveToward(this.post.x, this.post.z, dt);
-      this.facing = angleLerp(this.facing, Math.atan2(t.x - this.x, t.z - this.z), 0.3);
-      if (this.atkT <= 0 && !this.moving) {
-        this.atkT = CFG.ranger.interval / haste;
-        this.swingT = 0;
-        Proj.arrow(this.x, 1.5, this.z, t, this.dmg, false);
-        Sfx.at('arrow', this.x, this.z, 0.4);
-      }
-    } else if (t) {
+    const t = this.target;
+    if (this.ranged) {
+      const home = spot!;
+      if (Math.hypot(home.x - this.x, home.z - this.z) > 0.3) this.moveToward(home.x, home.z, dt);
+      if (t) {
+        this.facing = angleLerp(this.facing, Math.atan2(t.x - this.x, t.z - this.z), 0.3);
+        if (this.atkT <= 0 && !this.moving) {
+          this.atkT = CFG.ranger.interval / haste;
+          this.swingT = 0;
+          Proj.arrow(this.x, this.y + 1.5, this.z, t as Enemy, this.dmg, false);
+          Sfx.at('arrow', this.x, this.z, 0.4);
+        }
+      } else if (!this.moving) this.facing = angleLerp(this.facing, Math.PI, Math.min(1, dt * 5));
+      this.place(dt);
+      return;
+    }
+    const out = Sally.active;
+    // Too far behind the hero: drop everything and catch up.
+    const lagging = out && Math.hypot(this.x - hero.x, this.z - hero.z) > 13;
+    if (t && !lagging) {
       if (surfDist(this.x, this.z, this.r, t) <= CFG.soldier.range) {
         this.facing = angleLerp(this.facing, Math.atan2(t.x - this.x, t.z - this.z), 0.3);
         if (this.atkT <= 0) {
           this.atkT = CFG.soldier.interval / haste;
           this.swingT = 0;
-          t.damage(this.dmg, 'melee');
+          t.damage(this.dmg, 'melee', this);
           Sfx.at('hit', this.x, this.z, 0.4);
         }
-      } else this.moveToward(t.x, t.z, dt);
+      } else this.moveToward(t.x, t.z, dt, out);
+    } else if (out) {
+      // Escort ring round the hero.
+      const n = Math.max(1, soldiers.length);
+      const a = (this.slot / Math.min(n, 6)) * Math.PI * 2 + 0.6;
+      const rr = this.slot < 6 ? 2.1 : 3.2;
+      const sx = hero.x + Math.cos(a) * rr;
+      const sz = hero.z + Math.sin(a) * rr;
+      if (Math.hypot(sx - this.x, sz - this.z) > 0.5) this.moveToward(sx, sz, dt, true);
+      else this.facing = angleLerp(this.facing, hero.facing, Math.min(1, dt * 5));
     } else {
-      if (Math.hypot(this.post.x - this.x, this.post.z - this.z) > 0.3) this.moveToward(this.post.x, this.post.z, dt);
+      if (Math.hypot(this.post.x - this.x, this.post.z - this.z) > 0.3) this.moveToward(this.post.x, this.post.z, dt, this.z < W);
       else this.facing = angleLerp(this.facing, Math.PI, Math.min(1, dt * 5));
-      this.hp = Math.min(this.maxHp, this.hp + 5 * dt);
+      if (this.z > W) this.hp = Math.min(this.maxHp, this.hp + 5 * dt);
     }
-    this.m.group.position.set(this.x, 0, this.z);
+    this.y = hopY(this.x, this.z, this.r);
+    this.place(dt);
+  }
+
+  private place(dt: number): void {
+    this.m.group.position.set(this.x, this.y, this.z);
     this.m.group.rotation.y = this.facing;
     this.m.anim(dt, this.moving, CFG.soldier.speed, this.swingT);
-    this.bar.set(this.hp / this.maxHp, this.x, 2.4, this.z);
+    this.bar.set(this.hp / this.maxHp, this.x, this.y + 2.4, this.z);
   }
 
   dispose(): void {
@@ -1438,8 +1669,16 @@ function separate(): void {
         const push = rr - d;
         const nx = dx / d;
         const nz = dz / d;
-        const wa = b.r / rr;
-        const wb = a.r / rr;
+        let wa = b.r / rr;
+        let wb = a.r / rr;
+        // Camp guards give way to anyone on the march, so a ram rolling out can't get wedged.
+        if (a.guard && !b.guard) {
+          wa = 1;
+          wb = 0;
+        } else if (b.guard && !a.guard) {
+          wa = 0;
+          wb = 1;
+        }
         a.x -= nx * push * wa;
         a.z -= nz * push * wa;
         b.x += nx * push * wb;
@@ -1527,15 +1766,19 @@ export const Units = {
     return enemies.find((e) => e.alive && e.d.boss) ?? enemies.find((e) => e.alive && e.champion) ?? null;
   },
 
+  /** Enemies still to beat this wave (camp guards and routed enemies don't count). */
   aliveCount(): number {
     let n = 0;
-    for (const e of enemies) if (e.alive) n++;
+    for (const e of enemies) if (e.hostile) n++;
     return n;
   },
 
   update(dt: number): void {
     updateList(enemies, dt);
     separate();
+    updateSally(dt);
+    let slot = 0;
+    for (const s of soldiers) if (s.alive) s.slot = slot++;
     updateList(soldiers, dt);
     updateList(rangers, dt);
     for (const w of workers) w.update(dt);

@@ -6,7 +6,8 @@ import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh
 import { Input } from './input';
 import { pushOut } from './structures';
 import { World } from './world';
-import { enemies, type Enemy } from './units';
+import { enemies, wallHop, type Enemy } from './units';
+import { campNear, type Camp } from './camps';
 import { Bar, burst, fly, text, slash, dust, spark, ring, puff, hitStop, shakeAt } from './fx';
 import { on } from './events';
 import { Sfx } from './audio';
@@ -218,6 +219,20 @@ export function heroStrike(e: Enemy, mult: number, showText = true): number {
   return dmg;
 }
 
+/** Hero blow against an enemy camp (only the hero and his soldiers can tear one down). */
+export function heroHitCamp(c: Camp, mult: number, showText = true): void {
+  let dmg = Stat.heroDmg() * mult;
+  const crit = Math.random() < Stat.crit();
+  if (crit) dmg *= 2;
+  c.damage(dmg, 'melee', hero);
+  if (crit) {
+    hitStop(0.04);
+    shakeAt(c.x, c.z, 0.06, 0.4);
+    Sfx.at('crit', c.x, c.z, 0.8);
+  }
+  if (showText) text(c.x + (Math.random() - 0.5), 3.2, c.z + 1, String(Math.round(dmg)) + (crit ? '!' : ''), crit ? 'crit' : 'dmg', 0.7);
+}
+
 function pickup(node: ReturnType<typeof World.nearestHarvestable>): void {
   if (!node) return;
   const from = new THREE.Vector3(node.x, 1.0, node.z);
@@ -282,7 +297,21 @@ export function heroUpdate(dt: number): void {
   atkT -= dt;
   swingT += dt / 0.3;
   const foe = stunned ? null : nearestEnemy(CFG.hero.attackRange);
-  if (foe) {
+  const camp = foe || stunned ? null : campNear(hero.x, hero.z, CFG.hero.attackRange + hero.r);
+  if (camp) {
+    // Tearing down an enemy camp.
+    harvestT = 0;
+    swingStarted = false;
+    if (!hero.moving) targetFacing = Math.atan2(camp.x - hero.x, camp.z - hero.z);
+    if (atkT <= 0) {
+      atkT = Stat.heroAtkCd();
+      swingT = 0;
+      heroHitCamp(camp, 1);
+      slashFlip = -slashFlip;
+      slash(hero.x, 1.05, hero.z, Math.atan2(camp.x - hero.x, camp.z - hero.z), 0xfff4dc, 1.55, 0.2, slashFlip);
+      Sfx.play('hit');
+    }
+  } else if (foe) {
     harvestT = 0;
     swingStarted = false;
     if (!hero.moving) targetFacing = Math.atan2(foe.x - hero.x, foe.z - hero.z);
@@ -334,7 +363,8 @@ export function heroUpdate(dt: number): void {
   updateLook(m, dt, hero.slowT > 0 ? 'chill' : G.buffs.warcry > 0 ? 'holy' : null, G.time);
 
   hero.facing = angleLerp(hero.facing, targetFacing, Math.min(1, dt * 14));
-  m.group.position.set(hero.x, 0, hero.z);
+  // Over the top of a standing wall in one bound.
+  m.group.position.set(hero.x, wallHop(hero.x, hero.z, hero.r), hero.z);
   if (spinT > 0) {
     spinT -= dt;
     m.group.rotation.y = hero.facing + (1 - spinT / 0.45) * Math.PI * 4;

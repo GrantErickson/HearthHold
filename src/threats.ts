@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CFG } from './config';
 import { G, actOf, type EnemyType } from './state';
 import { enemies, Units, type Enemy } from './units';
+import { camps, type Camp } from './camps';
 import * as St from './structures';
 import { hero } from './hero';
 import { burst, ring, text, erupt, shakeAt, warnCircle, dust } from './fx';
@@ -201,6 +202,7 @@ function updateDanger(dt: number): void {
     lvl += boss ? 0.15 : 0;
     lvl += 0.35 * (1 - kr);
     if (tunnels.some((t) => t.state === 'warn')) lvl += 0.15;
+    for (const c of camps) if (c.up) lvl += 0.05;
   }
   Danger.level = clamp(lvl, 0, 1);
 
@@ -240,8 +242,19 @@ on('waveClear', () => {
 
 on('threat', (arg) => {
   if (G.autotest) return;
-  const a = arg as { kind: string; amount?: number; e?: Enemy };
+  const a = arg as { kind: string; amount?: number; e?: Enemy; camp?: Camp };
   switch (a.kind) {
+    case 'sally':
+      Sfx.play('rally', 0.8);
+      text(hero.x, 3.2, hero.z, 'With me!', 'gold', 1.2);
+      if (!G.flags.tipSally) {
+        G.flags.tipSally = true;
+        UI.toast('⚔️ Your soldiers follow you out. Go back inside and they return to the wall.');
+      }
+      break;
+    case 'campDown':
+      if (a.camp) UI.toast(`🔥 ${a.camp.def.name} razed! Its hold on the field is broken.`);
+      break;
     case 'breach':
       if (breachT > 0) return;
       breachT = 8;
@@ -286,6 +299,8 @@ function collect(): Marker[] {
   const out = _markers;
   out.length = 0;
   for (const t of tunnels) if (t.state === 'warn') out.push({ x: t.x, z: t.z, y: 0.5, icon: '⚠️', cls: 'warn' });
+  for (const c of camps) if (c.alive) out.push({ x: c.x, z: c.z, y: 2, icon: c.def.icon, cls: 'camp' });
+  if (G.phase !== 'wave') return out;
   let insideN = 0;
   for (const e of enemies) {
     if (!e.alive) continue;
@@ -306,7 +321,7 @@ export function renderThreats(): void {
   if (G.autotest) return;
   if (!layer) layer = document.getElementById('threats');
   if (!layer) return;
-  const list = G.phase === 'wave' ? collect() : [];
+  const list = G.phase === 'wave' || G.phase === 'build' ? collect() : [];
   const w = engine.w;
   const h = engine.h;
   const pad = 34;

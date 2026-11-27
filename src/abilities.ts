@@ -1,7 +1,8 @@
 import { CFG } from './config';
 import { G } from './state';
-import { hero, heroSpin, heroStrike, healHero } from './hero';
-import { enemies, soldiers, rangers, type Enemy } from './units';
+import { hero, heroSpin, heroStrike, heroHitCamp, healHero } from './hero';
+import { camps, campNear } from './camps';
+import { enemies, soldiers, rangers } from './units';
 import { repairFrac, wallFx } from './structures';
 import { Proj } from './projectiles';
 import { Stat, hasRelic } from './progress';
@@ -28,9 +29,10 @@ export function maxCd(a: AbilityId): number {
 }
 export const cooldown = (a: AbilityId): number => cds[a];
 
-function meteorTarget(): Enemy | null {
+/** Where the meteor should land: the biggest group in range, or an enemy camp. */
+function meteorTarget(): { x: number; z: number; vx: number; vz: number } | null {
   const R = CFG.ability.meteor.range;
-  let best: Enemy | null = null;
+  let best: { x: number; z: number; vx: number; vz: number } | null = null;
   let bn = 0;
   for (const e of enemies) {
     if (!e.alive || Math.hypot(e.x - hero.x, e.z - hero.z) > R) continue;
@@ -39,6 +41,15 @@ function meteorTarget(): Enemy | null {
     if (n > bn) {
       bn = n;
       best = e;
+    }
+  }
+  for (const c of camps) {
+    if (!c.alive || Math.hypot(c.x - hero.x, c.z - hero.z) > R) continue;
+    let n = 6;
+    for (const o of enemies) if (o.alive && (o.x - c.x) ** 2 + (o.z - c.z) ** 2 < 16) n++;
+    if (n > bn) {
+      bn = n;
+      best = { x: c.x, z: c.z, vx: 0, vz: 0 };
     }
   }
   return best;
@@ -51,7 +62,7 @@ export function blocked(a: AbilityId): string {
   if (cds[a] > 0) return `${Math.ceil(cds[a])}s`;
   if (G.phase !== 'wave' && G.phase !== 'build') return '…';
   if (a === 'meteor' && !meteorTarget()) return 'No targets';
-  if (a === 'whirlwind' && !enemies.some((e) => e.alive && Math.hypot(e.x - hero.x, e.z - hero.z) < CFG.ability.whirlwind.radius + 1)) return 'No targets';
+  if (a === 'whirlwind' && !enemies.some((e) => e.alive && Math.hypot(e.x - hero.x, e.z - hero.z) < CFG.ability.whirlwind.radius + 1) && !campNear(hero.x, hero.z, CFG.ability.whirlwind.radius)) return 'No targets';
   return '';
 }
 
@@ -65,6 +76,7 @@ export function cast(a: AbilityId): boolean {
       for (const e of enemies) {
         if (e.alive && Math.hypot(e.x - hero.x, e.z - hero.z) < c.radius + e.r) heroStrike(e, c.mult);
       }
+      for (const k of camps) if (k.alive && Math.hypot(k.x - hero.x, k.z - hero.z) < c.radius + k.r) heroHitCamp(k, c.mult);
       ring(hero.x, hero.z, 0xffffff, c.radius, 0.35, 0.5);
       for (let i = 0; i < 4; i++) slash(hero.x, 1.0, hero.z, (i / 4) * Math.PI * 2, 0xe8f4ff, c.radius * 0.9, 0.3, 1.6);
       dust(hero.x, hero.z, 1.6);

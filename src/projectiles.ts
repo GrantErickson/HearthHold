@@ -6,6 +6,7 @@ import { enemies, defenders, type Enemy } from './units';
 import { allStructures } from './structures';
 import { burst, flash, ring, puff, fire, boom, spark, dust, warnCircle, shakeAt, streaks, scorch, hitStop, kick } from './fx';
 import { hero } from './hero';
+import { camps } from './camps';
 import { Sfx } from './audio';
 import { aimPoint } from './util';
 import { G } from './state';
@@ -287,6 +288,7 @@ export const Proj = {
             e.knock(m.tx, m.tz, 10);
           }
         }
+        for (const c of camps) if (c.alive && Math.hypot(c.x - m.tx, c.z - m.tz) < m.splash + c.r) c.damage(m.dmg, 'fire', hero);
         boom(m.tx, 0.3, m.tz, m.splash * 1.1, { chunks: 22, big: true });
         ring(m.tx, m.tz, 0xffd27a, m.splash * 1.9, 0.7);
         ring(m.tx, m.tz, 0xffffff, m.splash * 1.2, 0.3, 0.1);

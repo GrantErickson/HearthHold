@@ -14,6 +14,7 @@ import { chestList } from './happenings';
 import { on, emit } from './events';
 import { UI } from './ui';
 import { tunnels } from './threats';
+import { camps } from './camps';
 import type { Enemy } from './units';
 
 /**
@@ -46,7 +47,12 @@ export function initDebugKeys(): void {
         if (G.phase === 'build') Waves.startWave();
         break;
       case 'KeyK':
-        for (const en of enemies) if (en.alive) en.damage(1e9, 'magic');
+        for (const en of enemies) {
+          if (!en.alive) continue;
+          en.wardHits = 0;
+          en.wardPhases = [];
+          en.damage(1e9, 'magic');
+        }
         break;
       case 'KeyH':
         St.S.keep.hp = St.S.keep.maxHp;
@@ -311,6 +317,8 @@ function snapshotRow(w: number, waveSecs: number, bought: string[]): Record<stri
     escaped: fightStats.escaped || undefined,
     wards: fightStats.wards || undefined,
     deaths: fightStats.heroDeaths || undefined,
+    camps: camps.filter((c) => c.alive).map((c) => c.kind[0]).join('') || undefined,
+    razed: G.stats.camps || undefined,
     keep: `${Math.round(St.S.keep.hp)}/${St.S.keep.maxHp}`,
     keepLv: G.keepLevel,
     lvl: G.level,
@@ -362,11 +370,40 @@ function botGoal(t: number): { x: number; z: number } | null {
   if (best) return { x: best.x, z: best.z };
   const tn = tunnels.find((x) => x.state === 'warn');
   if (tn) return { x: tn.x, z: tn.z + 2 };
+  // Nothing urgent at home: lead the garrison out against the nearest enemy camp.
+  const camp = nearestCamp();
+  if (camp) return { x: camp.x, z: camp.z };
   // Like a player, go out after stragglers once the main push is over.
-  const left = enemies.filter((e) => e.alive);
+  const left = enemies.filter((e) => e.hostile);
   const far = t > 45 && left.length <= 4 && left.length > 0 ? left.find((e) => e.z < W - 3 && e.flyH < 4) : undefined;
   if (far) return { x: far.x, z: far.z };
   return null;
+}
+
+function nearestCamp(): { x: number; z: number } | null {
+  let best: { x: number; z: number } | null = null;
+  let bd = Infinity;
+  for (const c of camps) {
+    if (!c.alive) continue;
+    const d = Math.hypot(c.x - hero.x, c.z - hero.z);
+    if (d < bd) {
+      bd = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+/** Between waves: raid a camp if there's time (honest bot, not ?passive). */
+function raid(step: StepFn): void {
+  let t = 0;
+  while (G.phase === 'build' && G.buildTimer > 9 && t < 40) {
+    const c = nearestCamp();
+    if (!c) break;
+    if (hero.alive) botWalk(c.x, c.z, 1.4);
+    step(DT);
+    t += DT;
+  }
 }
 
 /** Walk the hero toward a point at its real speed (no teleporting). */
@@ -409,10 +446,17 @@ function fight(step: StepFn): number {
   if (G.phase === 'wave') {
     for (const e of enemies) {
       if (!e.alive) continue;
-      stuck.push({ wave: G.wave, type: e.type, x: +e.x.toFixed(1), z: +e.z.toFixed(1), hp: Math.round(e.hp), max: e.maxHp, tgt: e.target ? (e.target.isStruct ? (e.target as St.Structure).id : 'unit') : null });
+      const tg = e.target;
+      const who = !tg ? null : tg.isStruct ? (tg as St.Structure).id : tg === hero ? 'hero' : soldiers.includes(tg as never) ? 'soldier' : rangers.includes(tg as never) ? 'ranger' : 'point';
+      stuck.push({ wave: G.wave, type: e.type, x: +e.x.toFixed(1), z: +e.z.toFixed(1), hp: Math.round(e.hp), max: e.maxHp, tgt: who, at: tg ? `${tg.x.toFixed(1)},${tg.z.toFixed(1)}${tg.alive ? '' : ' dead'}${(tg as unknown as { y?: number }).y ? ` y${(tg as unknown as { y: number }).y.toFixed(1)}` : ''}` : null, hostile: e.hostile });
     }
     // Clear the wave so the run can continue.
-    for (const e of enemies) if (e.alive) e.damage(1e12, 'magic');
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      e.wardHits = 0;
+      e.wardPhases = [];
+      e.damage(1e12, 'magic');
+    }
     for (let i = 0; i < 60 && G.phase === 'wave'; i++) step(DT);
   }
   return t;
@@ -452,6 +496,7 @@ export function runAutotest(step: StepFn): void {
             bought = bought.concat(shop(step));
             break;
           }
+          if (!passive && camps.some((c) => c.alive) && G.buildTimer > 24) raid(step);
           gatherTrip(step);
           bought = bought.concat(shop(step));
         }

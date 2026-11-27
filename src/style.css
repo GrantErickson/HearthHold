@@ -626,6 +626,13 @@ button.pill {
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
   white-space: pre;
 }
+.camps {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #ffb8a0;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  white-space: pre;
+}
 .wave-act {
   font-size: 12px;
   letter-spacing: 0.5px;
@@ -857,7 +864,8 @@ button.pill {
   .wave-mod {
     font-size: 12px;
   }
-  .buffs {
+  .buffs,
+  .camps {
     font-size: 12px;
   }
 }
@@ -1034,6 +1042,10 @@ button.pill {
 .threat.warn {
   --c: #ff8a2a;
   animation-duration: 0.35s;
+}
+.threat.camp {
+  --c: #d9603a;
+  animation: none;
 }
 @keyframes threatPulse {
   0%,

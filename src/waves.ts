@@ -123,7 +123,7 @@ export const Waves = {
           const affix = !big && Math.random() < ec ? ids[Math.floor(Math.random() * ids.length)] : null;
           Units.spawnEnemy(spec.type, (Math.random() * 2 - 1) * spread, CFG.map.spawnZ + Math.random() * 1.5, G.wave, { champion: spec.champion, affix });
         }
-      } else if (!enemies.some((e) => e.alive)) {
+      } else if (!enemies.some((e) => e.hostile)) {
         clearWave();
       }
     }

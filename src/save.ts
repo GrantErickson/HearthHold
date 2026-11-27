@@ -3,6 +3,8 @@ import { slots, getSlot, refreshPads } from './pads';
 import * as St from './structures';
 import { Units } from './units';
 import { emit } from './events';
+import { campsSave, campsRestore } from './camps';
+import type { CampKind } from './config';
 
 const KEY = 'hearthold-save-v2';
 
@@ -25,6 +27,8 @@ export interface SaveData {
   pendingRelics: number;
   up: Upgrades;
   research: Research;
+  /** Enemy camps still standing: [kind, x, z, hp fraction, wave]. */
+  camps?: [CampKind, number, number, number, number][];
 }
 
 export const Save = {
@@ -49,6 +53,7 @@ export const Save = {
       pendingRelics: G.pendingRelics,
       up: { ...G.up },
       research: { ...G.research },
+      camps: campsSave(),
     };
   },
 
@@ -109,6 +114,7 @@ export const Save = {
     G.flags = { ...G.flags, ...d.flags };
     G.stats = { ...G.stats, ...d.stats };
     St.market.pile = d.marketPile || 0;
+    campsRestore(d.camps);
     emit('statsChanged');
     St.repairAll();
     Units.fillSoldiers();

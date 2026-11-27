@@ -1019,6 +1019,146 @@ export function unitModel(kind: HumanKind, cast = true): UnitModel {
   }
 }
 
+// ───────────────────────────── Enemy camps ─────────────────────────────
+
+export type CampModelKind = 'drums' | 'workshop' | 'warren' | 'totem';
+const HIDE = 0xc9a477;
+const HIDE_D = 0x9a7a52;
+const WOOD = 0x7a5232;
+const WOOD_D = 0x5a3d26;
+const WAR_RED = 0x9a2a22;
+
+/** A hide tent: a four-sided cone with a dark door flap facing the village. */
+function tent(x: number, z: number, s: number, c: number): Part[] {
+  const R = 1.05 * s;
+  const H = 1.7 * s;
+  const face = R * Math.SQRT1_2;
+  const tilt = Math.atan(face / H);
+  return [
+    cone(R, H, 4, c, [x, H / 2, z], [0, PI / 4, 0]),
+    sbox(0.46 * s, 0.72 * s, 0.05, 0x3a2a1a, [x, 0.36 * s, z + face * (1 - 0.36 / 1.7) + 0.02], [-tilt, 0, 0]),
+    sbox(R * 1.25, 0.12 * s, 0.05, WAR_RED, [x, 0.95 * s, z + face * (1 - 0.95 / 1.7) + 0.03], [-tilt, 0, 0]),
+    cyl(0.035, 0.035, 0.55, 6, WOOD_D, [x, H + 0.15, z]),
+    sbox(0.32, 0.2, 0.03, WAR_RED, [x + 0.17, H + 0.3, z]),
+  ];
+}
+
+/** Trampled ground, stakes round the back, two tents, a fire and a war banner. */
+const campBaseGeo = () =>
+  cached('campbase', () => {
+    const p: Part[] = [cyl(2.75, 2.85, 0.08, 20, 0x8f7a5c, [0, 0.04, 0]), cyl(1.9, 1.9, 0.09, 16, 0x9c8664, [0.2, 0.045, 0.4])];
+    for (let i = 0; i <= 10; i++) {
+      const a = PI * (1.12 + i * 0.076);
+      const x = Math.cos(a) * 2.6;
+      const z = Math.sin(a) * 2.6;
+      const h = 1.05 + ((i * 7) % 5) * 0.09;
+      p.push(cyl(0.12, 0.14, h, 6, i % 2 ? WOOD : 0x6a4628, [x, h / 2, z], [0.08 * Math.cos(a), 0, -0.08 * Math.sin(a)]));
+      p.push(cone(0.12, 0.3, 6, 0xa67445, [x, h + 0.15, z]));
+    }
+    p.push(...tent(-1.45, -1.0, 1, HIDE), ...tent(1.55, -1.15, 0.85, HIDE_D));
+    // Camp fire.
+    for (let i = 0; i < 7; i++) p.push(dod(0.12, 0x8a8580, [-1.55 + Math.cos(i * 0.9) * 0.36, 0.08, 1.35 + Math.sin(i * 0.9) * 0.36]));
+    p.push(cyl(0.06, 0.06, 0.6, 6, WOOD_D, [-1.55, 0.1, 1.35], [0, 0.4, PI / 2]), cyl(0.06, 0.06, 0.6, 6, WOOD_D, [-1.55, 0.12, 1.35], [0, -0.7, PI / 2]));
+    p.push(glow(cone(0.2, 0.5, 7, 0xff7a1a, [-1.55, 0.35, 1.35]), 1), glow(cone(0.11, 0.32, 6, 0xffd24a, [-1.55, 0.3, 1.38]), 1));
+    // War banner with a skull.
+    p.push(cyl(0.06, 0.07, 3.4, 6, WOOD_D, [2.05, 1.7, 0.75]), sbox(0.95, 0.66, 0.04, WAR_RED, [2.55, 2.95, 0.75]));
+    p.push(sbox(0.95, 0.08, 0.05, 0x2a1a18, [2.55, 2.64, 0.76]), ball(0.17, BONE, [2.05, 3.5, 0.75], ZERO, [1, 0.95, 1]));
+    p.push(ball(0.045, 0x1a1010, [2.0, 3.5, 0.9]), ball(0.045, 0x1a1010, [2.1, 3.5, 0.9]));
+    return p;
+  });
+
+const campCenterGeo = (kind: CampModelKind) =>
+  cached('camp:' + kind, () => {
+    const p: Part[] = [];
+    if (kind === 'drums') {
+      for (const [x, z] of [[-0.42, 0.62], [0.42, 0.62], [0, -0.1]] as [number, number][]) p.push(sbox(0.1, 0.62, 0.1, WOOD_D, [x, 0.31, z]));
+      p.push(cyl(0.74, 0.64, 0.82, 16, WAR_RED, [0, 0.95, 0.35]));
+      p.push(tor(0.72, 0.05, 0x3a2a1a, [0, 1.33, 0.35], [PI / 2, 0, 0]), tor(0.64, 0.05, 0x3a2a1a, [0, 0.56, 0.35], [PI / 2, 0, 0]));
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * PI * 2;
+        p.push(sbox(0.04, 0.8, 0.04, 0xe8d8b0, [Math.cos(a) * 0.71, 0.95, 0.35 + Math.sin(a) * 0.71], [0, -a, i % 2 ? 0.35 : -0.35]));
+      }
+      // Two small drums.
+      p.push(cyl(0.34, 0.3, 0.5, 12, 0x7a2a22, [1.0, 0.25, 0.85]), cyl(0.32, 0.32, 0.04, 12, 0xead8b0, [1.0, 0.52, 0.85]));
+      p.push(cyl(0.3, 0.27, 0.44, 12, 0x6a3a2a, [-1.0, 0.22, 0.95]), cyl(0.28, 0.28, 0.04, 12, 0xead8b0, [-1.0, 0.46, 0.95]));
+    } else if (kind === 'workshop') {
+      // A ram half built on trestles, a crane and a log pile.
+      for (const x of [-0.75, 0.75]) p.push(sbox(0.1, 0.9, 0.1, WOOD_D, [x, 0.42, 0.15], [0.35, 0, 0]), sbox(0.1, 0.9, 0.1, WOOD_D, [x, 0.42, 0.65], [-0.35, 0, 0]));
+      p.push(cyl(0.24, 0.24, 2.5, 8, WOOD, [0, 0.86, 0.4], [0, 0, PI / 2]), cyl(0.3, 0.28, 0.42, 8, 0x50545a, [1.3, 0.86, 0.4], [0, 0, PI / 2]), cone(0.28, 0.4, 8, 0x60646a, [1.7, 0.86, 0.4], [0, 0, -PI / 2]));
+      p.push(box(0.2, 2.8, 0.2, WOOD_D, [-1.25, 1.4, 0.95]), box(1.9, 0.14, 0.14, WOOD_D, [-0.5, 2.72, 0.95]), sbox(0.03, 1.2, 0.03, 0x3a3a3a, [0.3, 2.1, 0.95]), box(0.36, 0.3, 0.36, 0x50545a, [0.3, 1.45, 0.95]));
+      p.push(box(0.12, 1.2, 0.12, WOOD_D, [-1.25, 2.1, 1.25], [0.8, 0, 0]));
+      for (let i = 0; i < 3; i++) p.push(cyl(0.2, 0.2, 1.4, 8, i === 1 ? 0x8a6a42 : WOOD, [1.1 + (i === 2 ? 0.2 : 0), 0.2 + (i === 2 ? 0.34 : 0), -0.25 - i * 0.2 + (i === 2 ? 0.3 : 0)], [PI / 2, 0.4, 0]));
+      p.push(box(0.5, 0.35, 0.3, 0x3a3a40, [-0.7, 0.18, 1.6]), box(0.25, 0.12, 0.3, 0x50545a, [-0.4, 0.4, 1.6]));
+    } else if (kind === 'warren') {
+      // A burrow mound with a dark hole, stolen coins and a goblin flag.
+      p.push(sph(1.25, 10, 8, 0x7a5a3a, [0, 0.05, -0.05], ZERO, [1.25, 0.7, 1.05]));
+      p.push(cyl(0.58, 0.62, 0.08, 16, 0x1a120c, [0, 0.52, 0.86], [-1.0, 0, 0]), tor(0.6, 0.1, 0x6a4a2a, [0, 0.52, 0.86], [-1.0 + PI / 2, 0, 0]));
+      for (let i = 0; i < 6; i++) p.push(dod(0.18 + (i % 3) * 0.05, 0x8a6a46, [Math.cos(i * 1.1) * 1.35, 0.12, 0.3 + Math.sin(i * 1.1) * 0.9]));
+      for (let i = 0; i < 12; i++) p.push(cyl(0.13, 0.13, 0.05, 10, i % 3 ? 0xf2c230 : 0xd9a520, [1.15 + Math.cos(i * 2.4) * 0.28 * (i % 3), 0.06 + Math.floor(i / 4) * 0.06, 1.1 + Math.sin(i * 2.4) * 0.28 * (i % 3)], [0.3 * Math.sin(i), 0, 0.3 * Math.cos(i)]));
+      p.push(box(0.5, 0.34, 0.36, 0x6b4423, [-1.15, 0.17, 1.25]), box(0.52, 0.08, 0.38, 0xd9a520, [-1.15, 0.36, 1.25]));
+      p.push(cyl(0.04, 0.04, 2.2, 6, WOOD_D, [0.45, 1.5, -0.3]), sbox(0.6, 0.42, 0.03, 0x5a8a2a, [0.77, 2.35, -0.3]));
+    } else {
+      // A carved totem: stacked faces, green eyes, spread wings, a skull, and a green fire bowl.
+      const cols = [0x8a5a3a, 0x6a3a2a, 0x8a5a3a, 0x5a6a3a];
+      for (let i = 0; i < 4; i++) {
+        const y = 0.38 + i * 0.72;
+        p.push(box(0.66, 0.68, 0.62, cols[i], [0, y, 0]));
+        p.push(glow(ball(0.075, 0x7dff8a, [0.16, y + 0.12, 0.32]), 1), glow(ball(0.075, 0x7dff8a, [-0.16, y + 0.12, 0.32]), 1));
+        p.push(sbox(0.34, 0.1, 0.04, 0x1a1010, [0, y - 0.14, 0.32]), sbox(0.7, 0.07, 0.66, 0x3a2a1a, [0, y - 0.34, 0]));
+      }
+      p.push(sbox(1.0, 0.32, 0.1, WAR_RED, [0.62, 2.55, 0], [0, 0, 0.35]), sbox(1.0, 0.32, 0.1, WAR_RED, [-0.62, 2.55, 0], [0, 0, -0.35]));
+      p.push(ball(0.32, BONE, [0, 3.25, 0], ZERO, [1, 0.9, 1]), ball(0.07, 0x1a1010, [0.11, 3.27, 0.27]), ball(0.07, 0x1a1010, [-0.11, 3.27, 0.27]));
+      p.push(cone(0.06, 0.4, 6, BONE, [0.26, 3.45, 0], [0, 0, -0.6]), cone(0.06, 0.4, 6, BONE, [-0.26, 3.45, 0], [0, 0, 0.6]));
+      for (let i = 0; i < 6; i++) p.push(dod(0.2, 0x8a8580, [Math.cos(i * 1.05) * 0.55, 0.1, Math.sin(i * 1.05) * 0.55]));
+      p.push(cyl(0.38, 0.22, 0.32, 12, 0x50545a, [0.95, 0.42, 1.05]), cyl(0.05, 0.05, 0.3, 6, 0x50545a, [0.95, 0.13, 1.05]));
+      p.push(glow(cone(0.3, 0.7, 7, 0x5aff6a, [0.95, 0.9, 1.05]), 1), glow(cone(0.16, 0.42, 6, 0xd8ffd0, [0.95, 0.8, 1.07]), 1));
+    }
+    return p;
+  });
+
+/** Drum skin that bounces on each beat. */
+const drumSkinGeo = () => cached('drumskin', () => [cyl(0.7, 0.7, 0.06, 16, 0xead8b0)], false);
+
+export interface CampModel extends UnitModel {
+  crew: UnitModel;
+  skin: THREE.Mesh | null;
+}
+
+/** An enemy war camp. The crew (drummer, builder, goblin, shaman) is animated by the camp. */
+export function campModel(kind: CampModelKind, cast = true): CampModel {
+  const group = new THREE.Group();
+  const body = new THREE.Group();
+  group.add(body);
+  body.add(makeMesh(campBaseGeo(), cast, true, Mat.unit));
+  body.add(makeMesh(campCenterGeo(kind), cast, true, Mat.unit));
+  const crewKind: HumanKind = kind === 'drums' ? 'brute' : kind === 'workshop' ? 'raider' : kind === 'warren' ? 'thief' : 'shaman';
+  const crew = unitModel(crewKind, cast);
+  const at: Record<CampModelKind, [number, number, number, number]> = {
+    drums: [0, 0, -0.62, 0],
+    workshop: [1.75, 0, 1.25, -2.2],
+    warren: [0, 0, 1.3, 0],
+    totem: [-0.6, 0, 1.3, 0.5],
+  };
+  const [cx, cy, cz, rot] = at[kind];
+  crew.group.position.set(cx, cy, cz);
+  crew.group.rotation.y = rot;
+  crew.group.scale.setScalar(kind === 'drums' ? 1.25 : 1);
+  body.add(crew.group);
+  let skin: THREE.Mesh | null = null;
+  if (kind === 'drums') {
+    skin = makeMesh(drumSkinGeo(), false, false, Mat.unit);
+    skin.position.set(0, 1.36, 0.35);
+    body.add(skin);
+  }
+  const m = finish(group, body, Mat.unit, () => undefined) as CampModel;
+  m.crew = crew;
+  m.skin = skin;
+  return m;
+}
+
+/** Height of the walkway on top of a wall of this level (palisades have none). */
+export const wallTopY = (lv: number): number => [0, 0, 2.2, 2.8, 3.2, 3.4, 3.6][lv] ?? 0;
+
 /** Swap the material of every mesh in a model (frozen solid, ghost…); null restores its own. */
 export function setModelMat(m: UnitModel, mat: THREE.Material | null): void {
   const use = mat ?? m.baseMat;

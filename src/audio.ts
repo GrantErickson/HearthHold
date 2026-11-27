@@ -9,7 +9,7 @@ export type SfxName =
   | 'zap' | 'freeze' | 'fire' | 'levelup' | 'whoosh' | 'explode' | 'roar' | 'chest' | 'bell' | 'heal'
   | 'thunk' | 'stab' | 'magic' | 'relic' | 'warcry' | 'act'
   | 'cannon' | 'crit' | 'clang' | 'shatter' | 'ward' | 'rumble' | 'burrow' | 'alarm' | 'stomp'
-  | 'heartbeat' | 'steal' | 'slam' | 'warn' | 'launch' | 'bigexplode' | 'grapple';
+  | 'heartbeat' | 'steal' | 'slam' | 'warn' | 'launch' | 'bigexplode' | 'grapple' | 'wardrum' | 'rally';
 
 const MUTE_KEY = 'hearthold-muted';
 const MUSIC_KEY = 'hearthold-music';
@@ -38,9 +38,10 @@ const minGap: Partial<Record<SfxName, number>> = {
   pay: 55, coin: 55, chop: 70, mine: 70, arrow: 55, hit: 45, swing: 70, drop: 40, pickup: 35, die: 45, hurt: 140, crumble: 220,
   zap: 70, freeze: 90, fire: 80, explode: 80, thunk: 70, stab: 110, magic: 80, heal: 200, boom: 60, cannon: 90, clang: 70,
   ward: 70, stomp: 110, crit: 60, launch: 90, warn: 200, steal: 300, grapple: 150, bigexplode: 150, slam: 200, heartbeat: 300,
+  wardrum: 120, rally: 600,
 };
 /** Never dropped by the voice limit. */
-const PRIORITY = new Set<SfxName>(['explode', 'bigexplode', 'horn', 'roar', 'alarm', 'shatter', 'win', 'lose', 'levelup', 'relic', 'act', 'rumble', 'burrow', 'steal', 'slam', 'crit']);
+const PRIORITY = new Set<SfxName>(['explode', 'bigexplode', 'horn', 'roar', 'alarm', 'shatter', 'win', 'lose', 'levelup', 'relic', 'act', 'rumble', 'burrow', 'steal', 'slam', 'crit', 'rally']);
 let voiceEnds: number[] = [];
 
 function makeNoise(c: AudioContext, kind: 'white' | 'brown'): AudioBuffer {
@@ -498,6 +499,26 @@ const defs: Record<SfxName, Def> = {
   warn: { wet: 0.2, play: (V, v) => { tone(V, 320, 0.5, 'sawtooth', 0.05 * v, { to: 760, lp: 1600, vib: 14, vibRate: 11 }); } },
   launch: { vary: 0.15, play: (V, v) => tone(V, 320, 0.22, 'sine', 0.09 * v, { to: 1150 }) },
   grapple: { wet: 0.1, play: (V, v) => { noise(V, 0.2, 0.1 * v, { f: 2000, f2: 900, q: 1.4, attack: 0.05 }); metal(V, 1500, 0.12, 0.03 * v, 0.16); } },
+  /** The enemy camp's big war drum. */
+  wardrum: {
+    wet: 0.35, vary: 0.03,
+    play: (V, v) => {
+      thump(V, 96, 40, 0.5, 0.62 * v);
+      noise(V, 0.3, 0.26 * v, { type: 'lowpass', f: 320, brown: true });
+      noise(V, 0.05, 0.12 * v, { f: 900, q: 1.2 });
+    },
+  },
+  /** A rallying horn call: the garrison follows the hero out. */
+  rally: {
+    wet: 0.4, vary: 0,
+    play: (V, v) => {
+      for (const [f, d, del] of [[196, 0.2, 0], [196, 0.16, 0.22], [294, 0.75, 0.42]] as [number, number, number][]) {
+        tone(V, f, d, 'sawtooth', 0.09 * v, { attack: 0.03, lp: 1400, delay: del, vib: 1.5, vibRate: 5 });
+        tone(V, f * 2, d, 'sawtooth', 0.03 * v, { attack: 0.03, lp: 2200, delay: del });
+      }
+      thump(V, 90, 50, 0.2, 0.2 * v);
+    },
+  },
 };
 
 // ───────────────────────────── War drums ─────────────────────────────

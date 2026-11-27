@@ -17,6 +17,11 @@ browser, in the carry-and-build style of mobile base-builder ads. No ads.
   thieves raid your coins, scalers climb over, warded elites and bosses shrug
   off towers until you strike them, and boss slams and boulders are telegraphed
   so you can dodge. Off-screen arrows point at what needs you.
+- **Take the fight to them**: from Act II the enemy pitches war camps on the
+  field (war drums, siege workshops, goblin warrens, shaman totems) that make
+  every wave harder until they're razed. Walk out past the wall and your
+  soldiers follow you; come back and they return to their posts. Archers man
+  the wall walk.
 - **Cartoon look and feel**: rounded models, cel shading, ink outlines, bloom,
   squash and stretch, knock-back, hit-stop, big layered explosions with screen
   shockwaves, scorch marks and enemies sent flying.
@@ -75,6 +80,7 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/abilities.ts`                               | Hero abilities                                                            |
 | `src/allies.ts`                                  | Griffin riders and the village dragon                                     |
 | `src/threats.ts`                                 | Tunnel ambushes, the danger level, alarms and off-screen threat arrows    |
+| `src/camps.ts`                                   | Enemy war camps on the far field: pitching, guards, effects, razing       |
 | `src/post.ts`                                    | Post-processing: ink outlines and bloom                                   |
 | `src/main.ts`                                    | Boot, game loop (sub-stepped for game speed), camera, keys                |
 | `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers, rangers and workers                              |

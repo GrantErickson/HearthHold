@@ -146,8 +146,8 @@ All costs and unlocks live in `src/pads.ts`; stats live in `src/config.ts`.
 | **Tar Pits** ×2 | 500 · 1400 · 3500 — slow, Lv3 burns | wave 18 |
 | Catapult | 900 · 2000 · **Great Trebuchet** 6000 | Keep 3 / 4 / 6 |
 | Keep | Lv2 200 … Lv8 26000 (HP 600 → 12000, arrows from Lv3) | waves 3, 8, 13, 24, 38, 55, 72 |
-| Barracks | 6 levels: 2 → 12 soldiers | Keep 2–6 |
-| **Archery Range** | 4 levels: 2 → 6 rangers shooting from behind the wall | Keep 3–6 |
+| Barracks | 6 levels: 2 → 12 soldiers. They hold the wall and follow the hero out past it | Keep 2–6 |
+| **Archery Range** | 4 levels: 2 → 6 rangers on the wall walk of stone walls (+3 range, out of melee reach), behind it on a palisade or a gap | Keep 3–6 |
 | Lumber Camp / Miners' Lodge | Build, then hire up to 6 workers each (hires 5–6 need Keep 5) | wave 1 / quarry |
 | Market Upgrade | 4 levels | wave 2, Keep 3/4/6 |
 | Backpack | 6 levels: 8 → 66 | first sale … Keep 5 |
@@ -187,7 +187,8 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
 - **Elites** (from wave 25): Armored, Swift, Regenerating, Shielded, Vampiric or
   Explosive, shown with a coloured ring. More HP, more coins and XP. From wave 45
   also **Warded**: a rune bubble that towers and troops can't hurt until the hero
-  strikes it.
+  strikes it. Left alone, an elite's ward fades after 45 s (a boss's never does),
+  so ignoring one costs time but can't stall a wave forever.
 - **Goblin Thief** (in tunnel parties from wave 30, climbs walls from wave 66):
   ignores fights, runs for the market, grabs coins (the uncollected pile first,
   then up to 15% of your purse) and flees north. Kill it to get the coins back.
@@ -221,6 +222,30 @@ From Act II the walls alone aren't enough:
   low, or the hero just took a heavy hit.
 - **Feel**: big enemies' footsteps thud and shake the ground; hits knock enemies
   back and heavy blows (crits, whirlwind, explosions) send the fallen flying.
+
+### War camps and sallying out
+
+- **The garrison follows the hero.** No orders: when the hero walks out past
+  the wall, the soldiers climb over and follow (a horn call, "With me!"). They
+  fight whatever is near him, form a ring round him when it's quiet, and run to
+  catch up if he gets ahead. When he comes back inside (or falls) they return
+  to their posts. Otherwise they stay behind a standing wall and spear whatever
+  is hammering at it. Rangers stay on the wall either way.
+- **War camps** (from wave 21, not on boss waves): pitched at the start of a
+  wave out on the far field (z −50 to −36), raised in 6 s, and they stay until
+  razed. One every other wave in Act II (at most 2 standing), one a wave in Act
+  III (at most 3), then one or two a wave (at most 4). Never two of a kind.
+  - 🥁 **War Drums** (wave 21+): every enemy moves 25% faster and hits 20% harder.
+  - 🪓 **Siege Workshop** (24+): rolls out 3 rams a wave (trebuchets mixed in from wave 50).
+  - 💰 **Goblin Warren** (30+): sends 3 goblin thieves a wave (5 from wave 70).
+  - 🗿 **Shaman Totem** (35+): every enemy regenerates 1.5% of its HP a second.
+- Only the hero (blows, whirlwind, meteor) and his foot soldiers can damage a
+  camp (HP 420 × the wave's HP scale). Each keeps 3–6 guards (by act) who hold
+  their posts, fight anyone who comes within 10, and are topped up every wave.
+  They don't count toward clearing the wave. Razing a camp pays half a wave
+  clear bonus and XP, and its guards flee.
+- The HUD lists standing camps and what they do; arrows at the screen edge
+  point at them, between waves too. Standing camps are saved in the checkpoint.
 
 ## 10. Between waves
 
@@ -275,13 +300,15 @@ From Act II the walls alone aren't enough:
   every building, enemy, boss and save). `?autotest&honest` makes the bot earn
   its own coins (balance check). `&waves=N` stops early. The bot's hero walks at
   its real speed and answers threats the way a player would (wards first, then
-  thieves, intruders and tunnels about to open); `&passive` keeps it parked
+  thieves, intruders and tunnels about to open, then the nearest enemy camp,
+  and between waves it raids a camp if there's time); `&passive` keeps it parked
   behind the centre of the wall instead. The report lists each wave's lowest
-  keep HP, defenses lost, tunnels, coins stolen and escaped, wards and hero
-  deaths, plus any enemy that got stuck.
+  keep HP, defenses lost, tunnels, coins stolen and escaped, wards, hero deaths,
+  camps standing (first letters) and razed so far, plus any enemy that got stuck.
 - Balance at the time of writing: the generous bot clears all 100 waves. The
-  honest bot that answers threats won its run (34 defenses lost, about 12k coins
-  stolen of 1.6M earned, waves of 55 to 85 s, about three minutes for the Dread
-  King). Parked behind the wall, two runs lost 56 and 86 defenses, had 51k and
-  109k coins stolen, dragged on for 150 to 500 s while warded enemies roamed, and
-  one of them fell at wave 100. The honest bot can still lose early in Act I.
+  honest bot that answers threats and raids camps won all three runs (13 to 53
+  defenses lost, 0 to 20k coins stolen of 1.8–2M earned, late waves about 50 s).
+  Parked behind the wall, five runs fell at waves 80, 84, 87 and 89 (and one in
+  Act I), with three or four camps standing from Act III on, 56k to 142k coins
+  stolen and the walls going down in the last waves. Its only razed camps are
+  the ones its meteor reaches from the wall.
