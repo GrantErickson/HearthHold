@@ -198,9 +198,17 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
 
 ## 13. Debug and tuning
 
-- `?debug`: `C` coins, `N` start wave, `K` kill all, `H` heal keep, `G` god mode,
-  `U` +1 wave cleared, `X` +500 XP. `?debug&start` skips the menu.
-  `?debug&preset=N` fast-forwards N waves with free coins (`&fight=S`, `&at=x,z`).
+- **Skip ahead** (dev server, or any build with `?debug`): a panel on the main
+  menu starts at any wave from 2 to 150. It grants the income, hero level, perks
+  and relics the honest bot had by that wave and spends the coins wave by wave
+  in the bot's order, so the base matches a typical run without battle damage.
+  The options are a typical base, a strong base (2× income) or coins only, plus
+  god mode. The URL form is `?wave=N&base=fair|strong|coins&god`. Using it turns
+  on the debug keys for the rest of the tab session; pressing Play turns them off.
+- `?debug` keys: `C` coins, `N` start wave, `K` kill all, `H` heal keep, `G` god
+  mode, `U` +1 wave cleared, `X` +500 XP, `J` skip 10 waves (between waves).
+  `?debug&start` skips the menu. `?debug&preset=N` plays N waves with the bot
+  and free coins, so the base shows real wear (`&fight=S`, `&at=x,z`).
 - `?autotest` runs a bot through all 100 waves with free coins (smoke test of
   every building, enemy, boss and save). `?autotest&honest` makes the bot earn
   its own coins (balance check). `&waves=N` stops early. The report lists each

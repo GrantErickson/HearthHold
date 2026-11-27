@@ -1,7 +1,7 @@
 import './style.css';
 import * as THREE from 'three';
 import { scene, camera, engine } from './engine';
-import { G } from './state';
+import { G, actOf } from './state';
 import { CFG } from './config';
 import { World } from './world';
 import { Env } from './env';
@@ -22,9 +22,11 @@ import { on, emit } from './events';
 import { updateAbilities, resetAbilities, type AbilityId } from './abilities';
 import { initHappenings, updateHappenings } from './happenings';
 import { pendingChoices } from './progress';
-import { initDebugKeys, runAutotest, runPreset } from './debug';
+import { initDebugKeys, runAutotest, runPreset, jumpTo, refreshDevBar, JUMP_BASES, type JumpBase } from './debug';
 
 const BOOT_KEY = 'hearthold-boot';
+/** Set for the rest of the tab session once "skip ahead" is used, so retries and Continue keep the test keys. */
+const TEST_KEY = 'hearthold-test';
 const SPEED_KEY = 'hearthold-speed';
 const MAX_STEP = 1 / 30;
 let objective: Objective | null = null;
@@ -178,6 +180,39 @@ function startNew(): void {
   if (!G.debug) emit('actStart', 1);
 }
 
+let debugOn = false;
+
+/** Cheat keys, the key reminder, error toasts and window.HH. */
+function enableDebug(): void {
+  G.debug = true;
+  refreshDevBar();
+  if (debugOn) return;
+  debugOn = true;
+  initDebugKeys();
+  window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
+  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine };
+}
+
+/** Test builds: start at a later wave with a base built from a typical run's income. */
+function startAt(wave: number, base: JumpBase, god: boolean): void {
+  Save.clear();
+  enableDebug();
+  try {
+    sessionStorage.setItem(TEST_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+  G.god = god;
+  G.phase = 'build';
+  jumpTo(wave, base);
+  Waves.startBuild();
+  UI.enterGame();
+  clearTexts();
+  UI.clearBanners();
+  emit('actStart', actOf(G.wavesCleared + 1));
+  refreshDevBar();
+}
+
 function startContinue(): void {
   const d = Save.read();
   if (!d) {
@@ -257,8 +292,21 @@ function boot(): void {
   refreshPads(true);
   if (!G.autotest) warmUp(renderer);
 
+  const devTools = import.meta.env.DEV || G.debug;
   UI.init({
-    play: startNew,
+    play: () => {
+      // A normal game from the menu leaves test mode (unless the URL asked for ?debug).
+      if (!params.has('debug')) {
+        G.debug = false;
+        refreshDevBar();
+        try {
+          sessionStorage.removeItem(TEST_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+      startNew();
+    },
     cont: startContinue,
     newGame: () => {
       Save.clear();
@@ -272,9 +320,16 @@ function boot(): void {
       UI.showScreen(null);
       Waves.startBuild();
     },
-    toMenu: () => location.reload(),
+    toMenu: () => {
+      // Drop one-shot start parameters so the menu doesn't jump straight back in.
+      const u = new URL(location.href);
+      for (const k of ['wave', 'base', 'god', 'preset', 'fight', 'at', 'start', 'continue']) u.searchParams.delete(k);
+      if (u.href === location.href) location.reload();
+      else location.replace(u.href);
+    },
     toggleMute,
     cycleSpeed,
+    jump: devTools ? startAt : undefined,
   });
   Input.init(renderer.domElement);
   Input.onKey((e) => {
@@ -343,11 +398,13 @@ function boot(): void {
     runAutotest(step);
     return;
   }
-  if (G.debug) {
-    initDebugKeys();
-    window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
-    (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine };
+  let testSession = false;
+  try {
+    testSession = devTools && sessionStorage.getItem(TEST_KEY) === '1';
+  } catch {
+    /* ignore */
   }
+  if (G.debug || testSession) enableDebug();
 
   let mode: string | null = null;
   try {
@@ -357,6 +414,8 @@ function boot(): void {
     /* ignore */
   }
   const preset = Number(params.get('preset') ?? 0);
+  const jumpWave = Number(params.get('wave') ?? 0);
+  const jumpBase = JUMP_BASES.find((b) => b === params.get('base')) ?? 'fair';
   if (G.debug && preset > 0) {
     startNew();
     runPreset(step, preset, Number(params.get('fight') ?? 0));
@@ -368,9 +427,10 @@ function boot(): void {
     }
     clearTexts();
     UI.clearBanners();
-  } else if (G.debug && params.has('start')) startNew();
-  else if (mode === 'continue' || (G.debug && params.has('continue'))) startContinue();
+  } else if (mode === 'continue' || (G.debug && params.has('continue'))) startContinue();
   else if (mode === 'new') startNew();
+  else if (devTools && jumpWave > 1) startAt(jumpWave, jumpBase, params.has('god'));
+  else if (G.debug && params.has('start')) startNew();
   else UI.showScreen('menu');
 
   requestAnimationFrame((t) => {

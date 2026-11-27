@@ -26,6 +26,9 @@ export const Input = {
     joyEl = document.getElementById('joy');
     knobEl = document.getElementById('joyKnob');
     window.addEventListener('keydown', (e) => {
+      // Typing in a form field (the test panel) is not a game key.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
       keys[e.code] = true;
       if (GAME_KEYS.has(e.code)) e.preventDefault();
       for (const h of keyHandlers) h(e);

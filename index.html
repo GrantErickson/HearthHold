@@ -44,6 +44,7 @@
         <button class="iconbtn" id="muteBtn" aria-label="Toggle sound">🔊</button>
       </div>
       <div class="abilities" id="abilities"></div>
+      <div class="devbar" id="devbar" hidden></div>
     </div>
 
     <div id="banner" aria-live="polite"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
@@ -70,6 +71,21 @@
             <li>Speed up time with <b>[</b> and <b>]</b> or the speed button. <b>Space</b> calls the next wave early.</li>
             <li>Five acts, 100 waves, ten bosses. Don't let the keep fall!</li>
           </ul>
+        </div>
+        <div class="dev" id="devPanel" hidden>
+          <div class="dev-title">🛠 Skip ahead <span>test builds only</span></div>
+          <div class="dev-row">
+            <label>Wave <input type="number" id="jumpWave" min="2" max="150" step="1" value="21" inputmode="numeric" /></label>
+            <select id="jumpBase" aria-label="Starting base">
+              <option value="fair">Typical base</option>
+              <option value="strong">Strong base (2× coins)</option>
+              <option value="coins">Coins only (build it yourself)</option>
+            </select>
+          </div>
+          <div class="dev-chips" id="jumpChips"></div>
+          <label class="dev-check"><input type="checkbox" id="jumpGod" /> God mode (the keep and hero can't die)</label>
+          <div class="dev-info" id="jumpInfo"></div>
+          <button class="btn gold" id="btnJump">Start at wave 21</button>
         </div>
         <p class="foot">No ads. No tracking. Progress is saved in this browser at the start of every wave.</p>
       </div>

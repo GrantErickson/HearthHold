@@ -17,6 +17,7 @@ import { currentOffer, takeChoice, pendingChoices, xpRatio, type Choice } from '
 import { ABILITIES, ABILITY_INFO, blocked, cast, cooldown, maxCd, unlocked, type AbilityId } from './abilities';
 import type { HappeningInfo } from './happenings';
 import type { Objective } from './tutorial';
+import type { JumpBase } from './debug';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -35,6 +36,8 @@ export interface UIHandlers {
   toMenu(): void;
   toggleMute(): void;
   cycleSpeed(dir: number): void;
+  /** Test builds only: start at a later wave. */
+  jump?(wave: number, base: JumpBase, god: boolean): void;
 }
 
 type ScreenId = 'menu' | 'pause' | 'over' | 'win' | 'fatal' | 'choose';
@@ -164,6 +167,73 @@ function renderChoices(): void {
   });
 }
 
+const JUMP_KEY = 'hearthold-jump';
+const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
+
+/** The "skip ahead" panel on the main menu (dev server or ?debug only). */
+function initJumpPanel(jump: NonNullable<UIHandlers['jump']>): void {
+  const input = $<HTMLInputElement>('jumpWave');
+  const base = $<HTMLSelectElement>('jumpBase');
+  const god = $<HTMLInputElement>('jumpGod');
+  const btn = $('btnJump');
+  const info = $('jumpInfo');
+  const chips = $('jumpChips');
+  try {
+    const d = JSON.parse(localStorage.getItem(JUMP_KEY) ?? '{}') as { wave?: number; base?: JumpBase; god?: boolean };
+    if (d.wave) input.value = String(d.wave);
+    if (d.base) base.value = d.base;
+    god.checked = !!d.god;
+  } catch {
+    /* ignore */
+  }
+  const wave = (): number => clamp(Math.round(Number(input.value) || 2), 2, 150);
+  const marks: [string, number][] = [['Act II', 21], ['Act III', 41], ['Act IV', 61], ['Act V', 81]];
+  for (let w = 10; w <= 100; w += 10) marks.push([`👑 ${w}`, w]);
+  const chipEls: { b: HTMLButtonElement; w: number }[] = [];
+  const refresh = (): void => {
+    const w = wave();
+    setText(btn, `Start at wave ${w}`);
+    const act = actOf(w);
+    const extra = w % 10 === 0 ? ` · boss: ${bossName(w)}` : isBossWave(w) ? ' · champions' : '';
+    setText(info, `${w > CFG.totalWaves ? 'Endless' : `Act ${ROMAN[act - 1]} · ${ACTS[act - 1].name}`}${extra}`);
+    for (const c of chipEls) c.b.classList.toggle('on', c.w === w);
+  };
+  for (const [label, w] of marks) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label;
+    b.title = w % 10 === 0 ? `Wave ${w}: ${bossName(w)}` : `Wave ${w}: start of Act ${ROMAN[actOf(w) - 1]}`;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      input.value = String(w);
+      refresh();
+    });
+    chips.appendChild(b);
+    chipEls.push({ b, w });
+  }
+  const go = (): void => {
+    const w = wave();
+    try {
+      localStorage.setItem(JUMP_KEY, JSON.stringify({ wave: w, base: base.value, god: god.checked }));
+    } catch {
+      /* ignore */
+    }
+    Sfx.unlock();
+    Sfx.play('click');
+    jump(w, base.value as JumpBase, god.checked);
+  };
+  input.addEventListener('input', refresh);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') go();
+  });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    go();
+  });
+  refresh();
+  $('devPanel').hidden = false;
+}
+
 export const UI = {
   init(h: UIHandlers): void {
     handlers = h;
@@ -258,6 +328,7 @@ export const UI = {
     on('structureLost', () => UI.toast('A defense fell — rebuild it at half price'));
     UI.refreshSound();
     UI.refreshMenu();
+    if (h.jump) initJumpPanel(h.jump);
   },
 
   refreshMenu(): void {

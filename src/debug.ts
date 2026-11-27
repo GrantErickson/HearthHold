@@ -1,21 +1,25 @@
 import { CFG } from './config';
-import { G, type Phase } from './state';
-import { enemies, soldiers, rangers, workers } from './units';
+import { G, actOf, type Phase } from './state';
+import { enemies, soldiers, rangers, workers, Units } from './units';
 import * as St from './structures';
 import { Waves } from './waves';
-import { slots, costOf, type Slot } from './pads';
-import { hero, capacity } from './hero';
+import { slots, costOf, refreshPads, type Slot } from './pads';
+import { hero, capacity, maxHp } from './hero';
 import { nodes, type ResNode } from './world';
 import { Save } from './save';
 import { Input } from './input';
 import { currentOffer, takeChoice, pendingChoices, Stat, gainXp } from './progress';
 import { ABILITIES, blocked, cast } from './abilities';
 import { chestList } from './happenings';
-import { on } from './events';
+import { on, emit } from './events';
+import { UI } from './ui';
 
 /**
  * Developer tools.
- *  ?debug              keyboard cheats (C coins, N next wave, K kill all, H heal keep, G god mode, U +1 wave cleared, X +XP)
+ *  ?debug              keyboard cheats (C coins, N next wave, K kill all, H heal keep, G god mode, U +1 wave cleared,
+ *                      X +XP, J skip 10 waves) and the "skip ahead" panel on the main menu
+ *  ?wave=N             (dev server or ?debug) start at wave N with a base built from a typical run's income;
+ *                      &base=strong doubles that income, &base=coins builds nothing, &god starts in god mode
  *  ?debug&preset=N     fast-forward N waves with free coins, then play normally
  *  ?autotest           headless bot run; writes a JSON report into the page
  *  ?autotest&honest    the bot only spends coins it earns by gathering, selling and fighting
@@ -25,8 +29,13 @@ import { on } from './events';
 type StepFn = (dt: number) => void;
 const DT = 1 / 30;
 
+let keysOn = false;
+
 export function initDebugKeys(): void {
+  if (keysOn) return;
+  keysOn = true;
   Input.onKey((e) => {
+    if (!G.debug || G.paused || (G.phase !== 'build' && G.phase !== 'wave')) return;
     switch (e.code) {
       case 'KeyC':
         G.coins += 500 + G.wavesCleared * 300;
@@ -42,6 +51,7 @@ export function initDebugKeys(): void {
         break;
       case 'KeyG':
         G.god = !G.god;
+        UI.toast(G.god ? 'God mode on: the keep and hero cannot die' : 'God mode off');
         break;
       case 'KeyU':
         G.wavesCleared++;
@@ -49,8 +59,137 @@ export function initDebugKeys(): void {
       case 'KeyX':
         gainXp(500);
         break;
+      case 'KeyJ':
+        if (G.phase === 'build') skipAhead(10);
+        else UI.toast('Skip ahead works between waves (press K to end this one)');
+        break;
     }
+    refreshDevBar();
   });
+  refreshDevBar();
+}
+
+/** The small key reminder shown in the corner while cheats are on. */
+export function refreshDevBar(): void {
+  const el = document.getElementById('devbar');
+  if (!el) return;
+  el.hidden = !G.debug;
+  el.textContent = `TEST · J +10 waves · N start wave · K kill all · C coins · H heal keep · X +XP · G god ${G.god ? 'ON' : 'off'}`;
+  el.classList.toggle('god', G.god);
+}
+
+// ───────────────────────────── Skip ahead ─────────────────────────────
+
+export type JumpBase = 'fair' | 'strong' | 'coins';
+export const JUMP_BASES: JumpBase[] = ['fair', 'strong', 'coins'];
+let jumpBase: JumpBase = 'fair';
+
+/** Total coins the honest autotest bot had earned by the end of each wave (average of two winning runs). */
+const EARNED: [number, number][] = [
+  [0, 0], [1, 300], [5, 1700], [10, 6800], [20, 43000], [30, 117000], [40, 240000], [50, 400000],
+  [60, 615000], [70, 865000], [80, 1140000], [90, 1530000], [100, 1960000],
+];
+
+function earnedBy(w: number): number {
+  if (w <= 0) return 0;
+  for (let i = 1; i < EARNED.length; i++) {
+    const [w1, e1] = EARNED[i];
+    if (w > w1) continue;
+    const [w0, e0] = EARNED[i - 1];
+    return e0 + ((e1 - e0) * (w - w0)) / (w1 - w0);
+  }
+  // Endless: keep the last decade's pace.
+  const [wl, el] = EARNED[EARNED.length - 1];
+  const [wp, ep] = EARNED[EARNED.length - 2];
+  return el + ((el - ep) / (wl - wp)) * (w - wl);
+}
+
+/** Hero level the honest bot reached by the start of wave w. */
+const levelAt = (w: number): number => Math.max(1, Math.round(1 + 0.64 * (w - 1)));
+
+/** Complete a pad purchase immediately, the same way loading a save does. */
+function buyNow(s: Slot): void {
+  G.coins -= costOf(s) - s.paid;
+  if (s.destroyed) {
+    s.destroyed = false;
+    s.rebuild?.(s);
+  } else {
+    const st = s.stages[s.stage];
+    s.stage++;
+    st.buy(s);
+  }
+  s.paid = 0;
+  s.acc = 0;
+  G.stats.built++;
+}
+
+/** Buy everything affordable in the bot's priority order, without walking to the pads. */
+function spendNow(): void {
+  for (let guard = 0; guard < 400; guard++) {
+    refreshPads(true);
+    let best: Slot | null = null;
+    let bestScore = Infinity;
+    for (const s of slots) {
+      if (!s.visible || s.temp) continue;
+      const rem = costOf(s) - s.paid;
+      if (rem > G.coins) continue;
+      const score = rem * weight(s);
+      if (score < bestScore) {
+        bestScore = score;
+        best = s;
+      }
+    }
+    if (!best) break;
+    buyNow(best);
+  }
+}
+
+/**
+ * Fast-forward the village to the build phase before wave `target`: grant the income, hero levels, perks and relics
+ * a typical run would have by then and spend the coins wave by wave. Nothing is fought, so nothing is damaged.
+ */
+export function jumpTo(target: number, base: JumpBase = jumpBase): void {
+  jumpBase = base;
+  const from = G.wavesCleared;
+  const to = Math.max(from, Math.floor(target) - 1);
+  const mul = base === 'strong' ? 2 : 1;
+
+  // Progression first, so structures get the right HP multipliers.
+  const lv = levelAt(to + 1);
+  if (lv > G.level) {
+    G.pendingPerks += lv - G.level;
+    G.level = lv;
+    G.xp = 0;
+  }
+  G.pendingRelics += Math.floor(to / 10) - Math.floor(from / 10);
+  pickAll();
+
+  G.tut = Math.max(G.tut, 6);
+  G.flags.firstSale = G.flags.firstCollect = true;
+  for (let w = from + 1; w <= to; w++) {
+    G.wavesCleared = w;
+    const income = Math.round((earnedBy(w) - earnedBy(w - 1)) * mul);
+    G.coins += income;
+    G.stats.earned += income;
+    if (base !== 'coins') spendNow();
+  }
+  if (to >= CFG.totalWaves) G.endless = true;
+
+  emit('statsChanged');
+  St.repairAll();
+  Units.fillSoldiers();
+  refreshPads(true);
+  hero.hp = maxHp();
+}
+
+/** In-game skip: jump `n` waves ahead from the current build phase. */
+function skipAhead(n: number): void {
+  const fromAct = actOf(G.wavesCleared + 1);
+  jumpTo(G.wavesCleared + 1 + n);
+  Waves.startBuild();
+  const next = G.wavesCleared + 1;
+  if (actOf(next) !== fromAct) emit('actStart', actOf(next));
+  UI.toast(`Skipped to wave ${next}`);
 }
 
 function stepFor(step: StepFn, seconds: number, each?: () => void): void {
@@ -98,7 +237,7 @@ function shop(step: StepFn): string[] {
 }
 
 function pickAll(): void {
-  for (let i = 0; i < 40 && pendingChoices() > 0; i++) {
+  for (let i = 0; i < 300 && pendingChoices() > 0; i++) {
     const o = currentOffer();
     if (!o?.length) break;
     takeChoice(o[Math.floor(Math.random() * o.length)]);

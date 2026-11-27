@@ -79,5 +79,12 @@ push to `main` builds and deploys the site through GitHub Actions.
 - Open `/?autotest` (smoke test of all 100 waves with free coins) or
   `/?autotest&honest` (balance check). Either one writes a JSON report into the
   page, including each wave's lowest keep HP and defenses lost.
-- `/?debug` enables cheat keys; `/?debug&preset=60&fight=20` jumps to a late
-  wave. See SPEC §13.
+- **Skip ahead to a later wave:** on the dev server, the main menu has a
+  *Skip ahead* panel. Pick a wave (or an act / boss shortcut), a starting base
+  and optional god mode. You can also link straight to it, e.g.
+  `http://localhost:5173/?wave=61&base=strong&god`. In game, `J` skips another
+  10 waves, `N` starts the wave, `K` kills everything; the keys are listed
+  bottom-left. On the published site, add `?debug` to get the same tools.
+- `/?debug` enables cheat keys; `/?debug&preset=60&fight=20` plays the first 60
+  waves with the bot instead (slower, but the base shows battle damage). See
+  SPEC §13.
