@@ -4,14 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#2b4f3a" />
-    <meta name="description" content="Hearthold — gather, sell, build and defend your keep against waves of raiders. No ads." />
+    <meta name="description" content="Hearthold — gather, sell, build and defend your keep through 100 waves of raiders, beasts, the undead and the Dark Legion. No ads." />
     <title>Hearthold</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%B0%3C/text%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Lilita+One&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="game"></div>
+    <div id="vignette" aria-hidden="true"></div>
     <div id="fx" aria-hidden="true"></div>
 
     <div id="hud" hidden>
@@ -19,23 +21,29 @@
         <div class="pill" id="coinPill" title="Coins"><span class="coin-ico" aria-hidden="true"></span><span id="coinVal">0</span></div>
         <div class="pill" id="carryPill" title="Carried / backpack size"><span class="emoji" aria-hidden="true">🎒</span><span id="carryVal">0/8</span></div>
         <div class="pill" id="hpPill" title="Hero health"><span class="emoji" aria-hidden="true">❤️</span><div class="minibar"><i id="hpBar"></i></div></div>
+        <button class="pill lvl" id="lvlPill" title="Hero level — press L to choose perks"><span class="lvl-num" id="lvlVal">1</span><div class="minibar xp"><i id="xpBar"></i></div><span class="lvl-new" id="lvlNew" hidden>⭐</span></button>
         <div class="objective" id="objective"><span id="objText"></span></div>
+        <div class="buffs" id="buffs"></div>
       </div>
       <div class="hud-center">
         <div class="card" id="waveCard">
+          <div class="wave-act" id="waveAct"></div>
           <div class="wave-title" id="waveTitle">Wave 1</div>
           <div class="wave-sub" id="waveSub"></div>
+          <div class="wave-mod" id="waveMod" hidden></div>
           <div class="bar"><i id="waveBar"></i></div>
           <button class="btn small gold" id="callBtn" hidden>Call now</button>
         </div>
         <div class="card slim" id="keepCard" title="Keep health"><span class="emoji" aria-hidden="true">🏰</span><div class="bar keep"><i id="keepBar"></i></div></div>
-        <div class="card slim boss" id="bossCard" hidden><span id="bossName">Warlord</span><div class="bar bossbar"><i id="bossBar"></i></div></div>
+        <div class="card slim boss" id="bossCard" hidden><span id="bossName">Warlord</span><div class="bar bossbar"><i id="bossBar"></i><b id="bossShield"></b></div></div>
         <div id="toast" role="status"></div>
       </div>
       <div class="hud-right">
+        <button class="iconbtn speed" id="speedBtn" aria-label="Game speed" title="Game speed ( [ and ] )">1×</button>
         <button class="iconbtn" id="pauseBtn" aria-label="Pause">❚❚</button>
         <button class="iconbtn" id="muteBtn" aria-label="Toggle sound">🔊</button>
       </div>
+      <div class="abilities" id="abilities"></div>
     </div>
 
     <div id="banner" aria-live="polite"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
@@ -45,7 +53,7 @@
       <div class="panel">
         <div class="crest" aria-hidden="true">🏰</div>
         <h1>Hearthold</h1>
-        <p class="tag">Gather. Build. Hold the keep.</p>
+        <p class="tag">Gather. Build. Hold the keep for 100 waves.</p>
         <div class="stack">
           <button class="btn primary" id="btnContinue" hidden>Continue</button>
           <button class="btn primary" id="btnPlay">Play</button>
@@ -57,8 +65,10 @@
             <li>Walk up to <b>trees and rocks</b> — your hero chops and mines automatically.</li>
             <li>Stand on the market's <b>SELL</b> pad, then scoop your money from <b>COINS</b>.</li>
             <li>Stand on a <b>build pad</b> to pay for it. Partial payments are kept.</li>
-            <li>Raiders attack from the north every wave. Walls, towers and soldiers help — and your hero fights too.</li>
-            <li>Survive <b>20 waves</b> and defeat the Warlord. Don't let the keep fall!</li>
+            <li>Every kill earns <b>XP</b>. Level up to choose perks (<b>L</b>) and unlock abilities: <b>Q</b> Whirlwind, <b>E</b> War Cry, <b>R</b> Meteor, <b>F</b> Bastion.</li>
+            <li>Bosses every 10 waves drop <b>relics</b>. Build an <b>Academy</b> for research, and watch for chests, merchants and gold rushes.</li>
+            <li>Speed up time with <b>[</b> and <b>]</b> or the speed button. <b>Space</b> calls the next wave early.</li>
+            <li>Five acts, 100 waves, ten bosses. Don't let the keep fall!</li>
           </ul>
         </div>
         <p class="foot">No ads. No tracking. Progress is saved in this browser at the start of every wave.</p>
@@ -74,7 +84,18 @@
           <button class="btn" id="btnRestart">Restart this wave</button>
           <button class="btn" id="btnMenu">Main menu</button>
         </div>
-        <p class="foot">Esc or P to pause · M to mute</p>
+        <div class="hero-sheet" id="heroSheet"></div>
+        <p class="foot">Esc or P to pause · M to mute · [ ] game speed</p>
+      </div>
+    </section>
+
+    <section class="screen" id="choose" hidden>
+      <div class="panel wide">
+        <div class="crest" aria-hidden="true" id="chooseCrest">⭐</div>
+        <h2 id="chooseTitle">Level up!</h2>
+        <p class="tag" id="chooseSub">Choose a perk</p>
+        <div class="cards" id="chooseCards"></div>
+        <button class="btn" id="btnLater">Later</button>
       </div>
     </section>
 
@@ -94,7 +115,7 @@
       <div class="panel">
         <div class="crest" aria-hidden="true">👑</div>
         <h2>Victory!</h2>
-        <p class="tag">The Warlord is defeated and Hearthold stands.</p>
+        <p class="tag">The Dread King is cast down and Hearthold stands — 100 waves held.</p>
         <p class="stats" id="winStats"></p>
         <div class="stack">
           <button class="btn primary" id="btnEndless">Keep playing (endless)</button>

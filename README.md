@@ -5,6 +5,16 @@ browser, in the carry-and-build style of mobile base-builder ads. No ads.
 
 **[▶ Play it in your browser](https://granterickson.github.io/HearthHold/)**
 
+- **100 waves in five acts**: raider clans, beast tribes, the restless dead, the
+  frozen north and the Dark Legion, with a boss every ten waves.
+- **25+ enemy types**: flyers, wall-phasing wraiths, sappers, healers, summoners,
+  siege engines, armored knights, elites with special affixes and wave modifiers.
+- **Deep defenses**: walls with six tiers, archer towers, ballista, frost, mage,
+  fire and holy towers, spike and tar traps, catapult, soldiers and rangers.
+- **Many ways to level up**: hero XP with perk choices, four abilities, boss
+  relics, equipment, Academy research, keep levels and repeatable Glory.
+- **Game speed** 1× to 3×, day/night, act seasons and weather.
+
 The full design is in [SPEC.md](SPEC.md).
 
 ## Run it
@@ -37,26 +47,37 @@ push to `main` builds and deploys the site through GitHub Actions.
 
 - **Move:** WASD / arrow keys, or touch and drag anywhere (mouse drag works too).
 - Chopping, mining and fighting happen automatically when you're close enough.
-- **Pause:** Esc / P · **Mute:** M
+- **Abilities:** Q Whirlwind · E War Cry · R Meteor · F Bastion (or the buttons).
+- **Perks and relics:** L or click the level badge, then 1/2/3.
+- **Game speed:** `[` and `]` or the speed button. **Call wave early:** Space.
+- **Zoom:** mouse wheel. **Pause:** Esc / P · **Mute:** M
 
 ## Project layout
 
-| File                                             | What it does                                                           |
-| ------------------------------------------------ | ---------------------------------------------------------------------- |
-| `src/config.ts`                                  | All balance numbers: hero, resources, defenses, enemies, wave formulas |
-| `src/pads.ts`                                    | Every build pad: costs, unlock rules, what each purchase does          |
-| `src/main.ts`                                    | Boot, game loop, camera                                                |
-| `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers and workers                                    |
-| `src/structures.ts`                              | Keep, walls, towers, catapult, market economy, collisions              |
-| `src/world.ts`                                   | Ground, scenery, trees / rocks / gold veins                            |
-| `src/models.ts`                                  | Every 3D model, built from primitives in code                          |
-| `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                 |
-| `src/ui.ts`, `src/style.css`, `index.html`       | HUD and menus                                                          |
-| `src/debug.ts`                                   | Debug cheats and the autotest bot (see SPEC §17)                       |
+| File                                             | What it does                                                              |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| `src/config.ts`                                  | Balance: hero, resources, defenses, enemies, acts, modifiers, perks, relics, wave formulas |
+| `src/pads.ts`                                    | Every build pad: costs, unlock rules, what each purchase does             |
+| `src/progress.ts`                                | Derived stats (`Stat`), XP and levels, perk and relic choices             |
+| `src/abilities.ts`                               | Hero abilities                                                            |
+| `src/main.ts`                                    | Boot, game loop (sub-stepped for game speed), camera, keys                |
+| `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers, rangers and workers                              |
+| `src/structures.ts`                              | Keep, walls, towers, special towers, traps, market economy, collisions    |
+| `src/projectiles.ts`                             | Arrows, magic bolts, boulders, ballista bolts, fireballs, meteors         |
+| `src/world.ts`                                   | Ground, grass, scenery, trees / rocks / gold / crystals                   |
+| `src/env.ts`                                     | Lighting, day/night, act palettes, seasons and weather                    |
+| `src/models.ts`                                  | Every 3D model, built from primitives in code, and the shared shaders     |
+| `src/fx.ts`                                      | Instanced particles and health bars, rings, beams, lightning, coin drops  |
+| `src/happenings.ts`                              | Treasure chests, the travelling merchant, gold rushes                     |
+| `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                    |
+| `src/ui.ts`, `src/style.css`, `index.html`       | HUD, ability bar, perk picker and menus                                   |
+| `src/debug.ts`                                   | Debug cheats and the autotest bot (see SPEC §13)                          |
 
 ## Testing
 
 - `npm run typecheck` checks the types.
-- Open `/?autotest` (smoke test with free coins) or `/?autotest&honest`
-  (balance check) in a browser. Either one writes a JSON report into the page.
-- `/?debug` enables cheat keys. See SPEC §17.
+- Open `/?autotest` (smoke test of all 100 waves with free coins) or
+  `/?autotest&honest` (balance check). Either one writes a JSON report into the
+  page, including each wave's lowest keep HP and defenses lost.
+- `/?debug` enables cheat keys; `/?debug&preset=60&fight=20` jumps to a late
+  wave. See SPEC §13.

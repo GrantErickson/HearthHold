@@ -4,16 +4,18 @@ import { CFG } from './config';
 import { G, addCoins, type DamageKind, type ResType, type Target } from './state';
 import {
   makeMesh, keepGeo, keepTop, marketGeo, wallGeo, wallRubbleGeo, towerGeo, towerTop, towerRubbleGeo,
-  catBaseGeo, catArmGeo, itemGeo, Mat,
+  catBaseGeo, catArmGeo, itemGeo, Mat, frostTowerGeo, frostOrbGeo, mageTowerGeo, mageOrbGeo, ballistaBaseGeo,
+  ballistaHeadGeo, fireTowerGeo, flameGeo, spireGeo, spireOrbGeo, spireTop, spikesGeo, spikeBedGeo, tarGeo,
 } from './models';
-import { Bar, burst, fly, pop, text } from './fx';
+import { Bar, burst, fly, pop, text, lightning, beam, ring, flash } from './fx';
 import { Sfx } from './audio';
-import { emit } from './events';
-import { enemies, soldiers, Units, type Enemy } from './units';
+import { emit, on } from './events';
+import { enemies, soldiers, rangers, Units, applySlow, defenders, type Enemy } from './units';
 import { Proj } from './projectiles';
-import { hero, popItem, stackTop } from './hero';
+import { hero, popItem, stackTop, maxHp as heroMaxHp } from './hero';
+import { Stat } from './progress';
 import type { Slot } from './pads';
-import { clamp, lerp } from './util';
+import { clamp, lerp, aimPoint } from './util';
 
 // ───────────────────────────── Colliders ─────────────────────────────
 
@@ -70,7 +72,13 @@ export function steer(x: number, z: number, dx: number, dz: number, r: number, i
 
 // ───────────────────────────── Structures ─────────────────────────────
 
-export type StructKind = 'wall' | 'tower' | 'keep' | 'catapult';
+export type SpecialKind = 'frost' | 'mage' | 'ballista' | 'fire' | 'spire';
+export type StructKind = 'wall' | 'tower' | 'keep' | 'catapult' | SpecialKind;
+
+const NAMES: Record<StructKind, string> = {
+  wall: 'Wall', tower: 'Tower', keep: 'Keep', catapult: 'Catapult', frost: 'Frost Tower', mage: 'Mage Tower',
+  ballista: 'Ballista', fire: 'Fire Tower', spire: 'Holy Spire',
+};
 
 export class Structure implements Target {
   readonly isStruct = true;
@@ -78,6 +86,7 @@ export class Structure implements Target {
   alive = true;
   hp: number;
   maxHp: number;
+  baseHp: number;
   cd = 0;
   mesh: THREE.Object3D | null = null;
   bar: Bar;
@@ -85,8 +94,12 @@ export class Structure implements Target {
   top = 4;
   arm: THREE.Group | null = null;
   armT = 1;
+  /** Spinning orb, ballista head or flame. */
+  spin: THREE.Object3D | null = null;
+  spinY = 0;
   flashT = 0;
-  flashing = false;
+  frozenT = 0;
+  matState: THREE.Material | null = null;
   id: string;
   kind: StructKind;
   x: number;
@@ -95,7 +108,7 @@ export class Structure implements Target {
   hd: number;
   level: number;
 
-  constructor(id: string, kind: StructKind, x: number, z: number, hw: number, hd: number, level: number, maxHp: number) {
+  constructor(id: string, kind: StructKind, x: number, z: number, hw: number, hd: number, level: number, baseHp: number) {
     this.id = id;
     this.kind = kind;
     this.x = x;
@@ -103,8 +116,34 @@ export class Structure implements Target {
     this.hw = hw;
     this.hd = hd;
     this.level = level;
-    this.hp = this.maxHp = maxHp;
+    this.baseHp = baseHp;
+    this.hp = this.maxHp = Math.round(baseHp * this.hpMul());
     this.bar = new Bar(kind === 'wall' ? 3.2 : kind === 'keep' ? 3.4 : 1.8, 0x5fd35f, 0.16);
+  }
+
+  hpMul(): number {
+    return this.kind === 'wall' ? Stat.wallHp() : Stat.structHp();
+  }
+
+  setBase(baseHp: number): void {
+    this.baseHp = baseHp;
+    this.hp = this.maxHp = Math.round(baseHp * this.hpMul());
+  }
+
+  /** Re-apply HP multipliers, keeping the current health ratio. */
+  refreshHp(): void {
+    const ratio = this.maxHp > 0 ? this.hp / this.maxHp : 1;
+    this.maxHp = Math.round(this.baseHp * this.hpMul());
+    if (this.alive) this.hp = this.maxHp * ratio;
+  }
+
+  get name(): string {
+    return NAMES[this.kind];
+  }
+
+  freeze(dur: number): void {
+    if (!this.alive || this.kind === 'keep' || this.kind === 'wall') return;
+    this.frozenT = Math.max(this.frozenT, dur);
   }
 
   damage(amount: number, _kind: DamageKind): void {
@@ -125,6 +164,7 @@ export const S = {
   walls: new Array<Structure | null>(CFG.map.segCount).fill(null),
   towers: [] as Structure[],
   catapult: null as Structure | null,
+  special: [] as Structure[],
 };
 
 export const market = {
@@ -143,6 +183,23 @@ export const market = {
 };
 
 export const barracks = { level: 0, x: -9, z: 11, door: { x: -9, z: 8.3 }, trainT: 0 };
+export const range = { level: 0, x: 9, z: 11, door: { x: 9, z: 8.3 }, trainT: 0 };
+
+// ───────────────────────────── Traps ─────────────────────────────
+
+export type TrapKind = 'spikes' | 'tar';
+interface Trap {
+  id: string;
+  kind: TrapKind;
+  x: number;
+  z: number;
+  level: number;
+  group: THREE.Group;
+  spikes: THREE.Mesh | null;
+  cd: number;
+  thrust: number;
+}
+export const traps: Trap[] = [];
 
 // ───────────────────────────── Wall helpers ─────────────────────────────
 
@@ -175,15 +232,20 @@ export function nearGap(x: number, maxDist: number): number | null {
 function setMesh(s: Structure, o: THREE.Object3D, animate = true): void {
   if (s.mesh) scene.remove(s.mesh);
   s.mesh = o;
+  s.spin = null;
+  s.arm = null;
   o.position.set(s.x, 0, s.z);
   scene.add(o);
-  s.flashing = false;
+  s.matState = null;
   if (animate) pop(o);
 }
 
-function setObjFlash(o: THREE.Object3D, on: boolean): void {
-  o.traverse((c) => {
-    if (c instanceof THREE.Mesh && (c.material === Mat.vc || c.material === Mat.flash)) c.material = on ? Mat.flash : Mat.vc;
+function setStructMat(s: Structure, mat: THREE.Material | null): void {
+  if (s.matState === mat || !s.mesh) return;
+  s.matState = mat;
+  const use = mat ?? Mat.vc;
+  s.mesh.traverse((c) => {
+    if (c instanceof THREE.Mesh && c.userData.swap !== false) c.material = use;
   });
 }
 
@@ -205,6 +267,14 @@ export function initBase(): void {
   im.frustumCulled = false;
   scene.add(im);
   market.pileMesh = im;
+
+  on('statsChanged', refreshAllHp);
+}
+
+function refreshAllHp(): void {
+  for (const s of allStructures()) s.refreshHp();
+  Units.refreshDefenders();
+  if (hero.alive) hero.hp = Math.min(hero.hp, heroMaxHp());
 }
 
 export function buildWall(i: number, lv: number, slot: Slot): void {
@@ -217,7 +287,7 @@ export function buildWall(i: number, lv: number, slot: Slot): void {
   w.slot = slot;
   slot.struct = w;
   w.level = lv;
-  w.maxHp = w.hp = hp;
+  w.setBase(hp);
   w.alive = true;
   setMesh(w, makeMesh(wallGeo(lv)), !G.autotest);
   G.flags.firstWall = true;
@@ -232,7 +302,7 @@ export function buildTower(slot: Slot, x: number, z: number, lv: number): void {
     t.slot = slot;
   }
   t.level = lv;
-  t.maxHp = t.hp = CFG.tower.hp[lv - 1];
+  t.setBase(CFG.tower.hp[lv - 1]);
   t.alive = true;
   t.top = towerTop(lv);
   setMesh(t, makeMesh(towerGeo(lv)), !G.autotest);
@@ -251,7 +321,7 @@ export function buildCatapult(slot: Slot, lv: number): void {
     c.slot = slot;
   }
   c.level = lv;
-  c.maxHp = c.hp = CFG.catapult.hp[lv - 1];
+  c.setBase(CFG.catapult.hp[lv - 1]);
   c.alive = true;
   c.top = 2.4;
   const g = new THREE.Group();
@@ -261,16 +331,107 @@ export function buildCatapult(slot: Slot, lv: number): void {
   arm.rotation.x = -0.35;
   arm.add(makeMesh(catArmGeo()));
   g.add(arm);
-  c.arm = arm;
   setMesh(c, g, !G.autotest);
+  c.arm = arm;
   addCollider('catapult', x, z, 1.1, 1.4);
+}
+
+const SPECIAL_HP: Record<SpecialKind, number[]> = {
+  frost: CFG.frost.hp, mage: CFG.mage.hp, ballista: CFG.ballista.hp, fire: CFG.fire.hp, spire: CFG.spire.hp,
+};
+
+export function buildSpecial(slot: Slot, kind: SpecialKind, x: number, z: number, lv: number): void {
+  let t = slot.struct;
+  const hp = SPECIAL_HP[kind][lv - 1];
+  if (!t) {
+    t = new Structure(slot.id, kind, x, z, 1.25, 1.25, lv, hp);
+    S.special.push(t);
+    slot.struct = t;
+    t.slot = slot;
+  }
+  t.level = lv;
+  t.setBase(hp);
+  t.alive = true;
+  const g = new THREE.Group();
+  let spin: THREE.Object3D | null = null;
+  switch (kind) {
+    case 'frost': {
+      const h = 3.2 + lv * 0.5;
+      g.add(makeMesh(frostTowerGeo(lv)));
+      spin = makeMesh(frostOrbGeo(), true, false);
+      t.spinY = h + 1.3;
+      t.top = h + 1.3;
+      break;
+    }
+    case 'mage': {
+      const h = 4 + lv * 0.5;
+      g.add(makeMesh(mageTowerGeo(lv)));
+      spin = makeMesh(mageOrbGeo(), true, false);
+      t.spinY = h + 4.5;
+      t.top = h + 4.5;
+      break;
+    }
+    case 'ballista': {
+      g.add(makeMesh(ballistaBaseGeo(lv)));
+      spin = makeMesh(ballistaHeadGeo(lv));
+      t.spinY = 1.65;
+      t.top = 2.3;
+      break;
+    }
+    case 'fire': {
+      const h = 3 + lv * 0.4;
+      g.add(makeMesh(fireTowerGeo(lv)));
+      spin = makeMesh(flameGeo(), false, false);
+      spin.scale.setScalar(0.8 + lv * 0.1);
+      t.spinY = h + 0.6;
+      t.top = h + 1.4;
+      break;
+    }
+    case 'spire': {
+      g.add(makeMesh(spireGeo(lv)));
+      spin = makeMesh(spireOrbGeo(), true, false);
+      t.spinY = spireTop(lv) + 0.3;
+      t.top = spireTop(lv) + 0.3;
+      break;
+    }
+  }
+  setMesh(t, g, !G.autotest);
+  if (spin) {
+    spin.position.y = t.spinY;
+    if (kind !== 'ballista') spin.userData.swap = false;
+    g.add(spin);
+    t.spin = spin;
+  }
+  addCollider(t.id, x, z, 1.25, 1.25);
+}
+
+export function buildTrap(slot: Slot, kind: TrapKind, x: number, z: number, lv: number): void {
+  let tr = traps.find((t) => t.id === slot.id);
+  if (!tr) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    scene.add(group);
+    tr = { id: slot.id, kind, x, z, level: lv, group, spikes: null, cd: 0, thrust: 0 };
+    traps.push(tr);
+  }
+  tr.level = lv;
+  tr.group.clear();
+  if (kind === 'spikes') {
+    tr.group.add(makeMesh(spikeBedGeo(lv), false, true));
+    tr.spikes = makeMesh(spikesGeo(lv), true, false);
+    tr.spikes.scale.y = 0.4;
+    tr.group.add(tr.spikes);
+  } else {
+    tr.group.add(makeMesh(tarGeo(lv), false, true));
+  }
+  if (!G.autotest) pop(tr.group);
 }
 
 export function setKeepLevel(lv: number): void {
   const k = S.keep;
   G.keepLevel = lv;
   k.level = lv;
-  k.maxHp = k.hp = CFG.keep.hp[lv - 1];
+  k.setBase(CFG.keep.hp[lv - 1]);
   k.top = keepTop(lv);
   setMesh(k, makeMesh(keepGeo(lv)), !G.autotest);
 }
@@ -281,7 +442,13 @@ export function setMarketLevel(lv: number): void {
 
 export function setBarracksLevel(lv: number): void {
   barracks.level = lv;
-  for (const s of soldiers) s.refreshStats();
+  Units.refreshDefenders();
+  Units.fillSoldiers();
+}
+
+export function setRangeLevel(lv: number): void {
+  range.level = lv;
+  Units.refreshDefenders();
   Units.fillSoldiers();
 }
 
@@ -298,6 +465,7 @@ export function placeBuilding(id: string, geo: THREE.BufferGeometry, x: number, 
 export function ruin(s: Structure): void {
   s.alive = false;
   s.hp = 0;
+  s.frozenT = 0;
   s.bar.hide();
   const geo = s.kind === 'wall' ? wallRubbleGeo(s.level) : towerRubbleGeo();
   setMesh(s, makeMesh(geo, false), false);
@@ -315,24 +483,75 @@ function destroyStructure(s: Structure): void {
     return;
   }
   ruin(s);
-  const name = s.kind === 'wall' ? 'Wall' : s.kind === 'tower' ? 'Tower' : 'Catapult';
-  text(s.x, 3.5, s.z, `${name} destroyed!`, 'red');
+  text(s.x, 3.5, s.z, `${s.name} destroyed!`, 'red');
   emit('structureLost', s);
 }
 
 /** After a wave: everything still standing is fully repaired. */
 export function repairAll(): void {
-  for (const w of S.walls) if (w && w.alive) w.hp = w.maxHp;
-  for (const t of S.towers) if (t.alive) t.hp = t.maxHp;
-  if (S.catapult?.alive) S.catapult.hp = S.catapult.maxHp;
-  S.keep.hp = S.keep.maxHp;
+  for (const s of allStructures()) {
+    if (s.alive) {
+      s.hp = s.maxHp;
+      s.frozenT = 0;
+    }
+  }
 }
 
+/** Bastion ability: patch everything up by a fraction of max HP. */
+export function repairFrac(frac: number): void {
+  for (const s of allStructures()) {
+    if (!s.alive) continue;
+    s.hp = Math.min(s.maxHp, s.hp + s.maxHp * frac);
+    s.frozenT = 0;
+    if (s.kind !== 'wall') burst(s.x, 2, s.z, 0x7dff8a, 6, { glow: true, speed: 2, up: 3 });
+  }
+  for (const w of S.walls) if (w?.alive) burst(w.x, 2, w.z, 0x7dff8a, 10, { glow: true, speed: 3, up: 3, spread: 8 });
+}
+
+/** Things enemies go after on their way to the keep (not walls). */
 export function attackables(): Structure[] {
   const out: Structure[] = [];
   for (const t of S.towers) if (t.alive) out.push(t);
+  for (const t of S.special) if (t.alive) out.push(t);
   if (S.catapult?.alive) out.push(S.catapult);
   return out;
+}
+
+export function allStructures(): Structure[] {
+  const all: Structure[] = [S.keep, ...S.towers, ...S.special];
+  for (const w of S.walls) if (w) all.push(w);
+  if (S.catapult) all.push(S.catapult);
+  return all;
+}
+
+/** Nearest living structure (optionally including walls and the keep). */
+export function nearestStructure(x: number, z: number, maxDist: number, withWalls: boolean): Structure | null {
+  let best: Structure | null = null;
+  let bd = maxDist;
+  const list = withWalls ? allStructures() : attackables();
+  for (const s of list) {
+    if (!s.alive) continue;
+    const [ax, az] = aimPoint(x, z, s);
+    const d = Math.hypot(ax - x, az - z);
+    if (d < bd) {
+      bd = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
+/** Freeze towers near a point. Returns how many were frozen. */
+export function freezeAround(x: number, z: number, radius: number, dur: number): number {
+  let n = 0;
+  for (const s of attackables()) {
+    if (Math.hypot(s.x - x, s.z - z) < radius) {
+      s.freeze(dur);
+      burst(s.x, s.top, s.z, 0xbff4ff, 8, { glow: true, speed: 2, up: 2 });
+      n++;
+    }
+  }
+  return n;
 }
 
 // ───────────────────────────── Market ─────────────────────────────
@@ -354,10 +573,11 @@ function updateMarket(dt: number): void {
   if (m.queue.length) {
     m.timer += dt;
     const iv = CFG.market.interval[L] / (1 + m.queue.length / 15);
+    const mul = CFG.market.valueMul[L] * Stat.sellMul();
     while (m.timer >= iv && m.queue.length) {
       m.timer -= iv;
       const t = m.queue.shift()!;
-      m.pile += Math.round(CFG.res[t].value * CFG.market.valueMul[L]);
+      m.pile += Math.round(CFG.res[t].value * mul);
     }
   } else m.timer = 0;
 
@@ -416,39 +636,76 @@ function updatePile(): void {
 
 // ───────────────────────────── Combat ─────────────────────────────
 
-function nearestEnemies(x: number, z: number, range: number, n: number, minRange = 0): Enemy[] {
-  const list: { e: Enemy; d: number }[] = [];
+const _near: { e: Enemy; d: number }[] = [];
+function nearestEnemies(x: number, z: number, range: number, n: number, minRange = 0, ground = false): Enemy[] {
+  _near.length = 0;
   for (const e of enemies) {
-    if (!e.alive) continue;
+    if (!e.alive || (ground && e.flying)) continue;
     const d = Math.hypot(e.x - x, e.z - z);
-    if (d <= range && d >= minRange) list.push({ e, d });
+    if (d <= range && d >= minRange) _near.push({ e, d });
   }
-  list.sort((a, b) => a.d - b.d);
-  return list.slice(0, n).map((o) => o.e);
+  _near.sort((a, b) => a.d - b.d);
+  return _near.slice(0, n).map((o) => o.e);
+}
+
+/** Enemy with the most HP in range (bosses first). */
+function toughestEnemy(x: number, z: number, range: number): Enemy | null {
+  let best: Enemy | null = null;
+  let bs = -1;
+  for (const e of enemies) {
+    if (!e.alive || Math.hypot(e.x - x, e.z - z) > range) continue;
+    const s = e.hp + (e.isBoss ? 1e7 : 0);
+    if (s > bs) {
+      bs = s;
+      best = e;
+    }
+  }
+  return best;
+}
+
+/** Centre of the densest group of ground enemies in range. */
+function densest(x: number, z: number, range: number, minRange: number, r2: number): Enemy | null {
+  let best: Enemy | null = null;
+  let bestN = 0;
+  for (const e of enemies) {
+    if (!e.alive || e.flying) continue;
+    const d = Math.hypot(e.x - x, e.z - z);
+    if (d > range || d < minRange) continue;
+    let n = 0;
+    for (const o of enemies) if (o.alive && !o.flying && (o.x - e.x) ** 2 + (o.z - e.z) ** 2 < r2) n++;
+    if (n > bestN) {
+      bestN = n;
+      best = e;
+    }
+  }
+  return best;
 }
 
 function updateTowers(dt: number): void {
+  const haste = Stat.haste();
+  const tdmg = Stat.towerDmg();
   for (const t of S.towers) {
-    if (!t.alive) continue;
-    t.cd -= dt;
+    if (!t.alive || t.frozenT > 0) continue;
+    t.cd -= dt * haste;
     if (t.cd > 0) continue;
     const L = t.level - 1;
-    const targets = nearestEnemies(t.x, t.z, CFG.tower.range[L], CFG.tower.shots[L]);
+    const targets = nearestEnemies(t.x, t.z, CFG.tower.range[L], CFG.tower.shots[L] + Stat.extraArrows());
     if (!targets.length) {
       t.cd = 0.15;
       continue;
     }
-    for (const e of targets) Proj.arrow(t.x, t.top, t.z, e, CFG.tower.dmg[L], false);
+    for (const e of targets) Proj.arrow(t.x, t.top, t.z, e, CFG.tower.dmg[L] * tdmg, false);
     t.cd = CFG.tower.interval[L];
     Sfx.at('arrow', t.x, t.z, 0.8);
   }
   const k = S.keep;
   if (k.alive && k.level >= 3) {
-    k.cd -= dt;
+    k.cd -= dt * haste;
     if (k.cd <= 0) {
-      const targets = nearestEnemies(k.x, k.z, CFG.keep.range, CFG.keep.shots[k.level - 1]);
+      const L = k.level - 1;
+      const targets = nearestEnemies(k.x, k.z, CFG.keep.range[L], CFG.keep.shots[L]);
       if (targets.length) {
-        for (const e of targets) Proj.arrow(k.x, k.top + 2, k.z, e, CFG.keep.dmg[k.level - 1], false);
+        for (const e of targets) Proj.arrow(k.x, k.top + 2, k.z, e, CFG.keep.dmg[L] * Stat.keepDmg(), false);
         k.cd = CFG.keep.interval;
         Sfx.at('arrow', k.x, k.z, 0.7);
       } else k.cd = 0.2;
@@ -463,23 +720,11 @@ function updateCatapult(dt: number): void {
     c.armT = Math.min(1, c.armT + dt / 0.9);
     c.arm.rotation.x = c.armT < 0.2 ? lerp(-0.35, 1.9, c.armT / 0.2) : lerp(1.9, -0.35, (c.armT - 0.2) / 0.8);
   }
-  c.cd -= dt;
+  if (c.frozenT > 0) return;
+  c.cd -= dt * Stat.haste();
   if (c.cd > 0) return;
   const L = c.level - 1;
-  const R = CFG.catapult.range[L];
-  let best: Enemy | null = null;
-  let bestN = 0;
-  for (const e of enemies) {
-    if (!e.alive) continue;
-    const d = Math.hypot(e.x - c.x, e.z - c.z);
-    if (d > R || d < CFG.catapult.minRange) continue;
-    let n = 0;
-    for (const o of enemies) if (o.alive && (o.x - e.x) ** 2 + (o.z - e.z) ** 2 < 9) n++;
-    if (n > bestN) {
-      bestN = n;
-      best = e;
-    }
-  }
+  const best = densest(c.x, c.z, CFG.catapult.range[L], CFG.catapult.minRange, 9);
   if (!best) {
     c.cd = 0.3;
     return;
@@ -488,42 +733,211 @@ function updateCatapult(dt: number): void {
   const tx = best.x + best.vx * flight;
   const tz = best.z + best.vz * flight;
   c.mesh.rotation.y = Math.atan2(-(tx - c.x), -(tz - c.z));
-  Proj.boulder(c.x, c.top, c.z, tx, tz, CFG.catapult.dmg[L], CFG.catapult.splash, flight);
+  Proj.boulder(c.x, c.top, c.z, tx, tz, CFG.catapult.dmg[L] * Stat.siegeDmg(), CFG.catapult.splash[L], flight, false, false);
   c.cd = CFG.catapult.interval[L];
   c.armT = 0;
   Sfx.at('swing', c.x, c.z);
 }
 
-function updateBarracks(dt: number): void {
-  if (barracks.level <= 0) return;
-  const cap = CFG.soldier.cap[barracks.level - 1];
-  const alive = soldiers.filter((s) => s.alive).length;
-  if (alive < cap) {
-    barracks.trainT += dt;
-    if (barracks.trainT >= CFG.soldier.train) {
-      barracks.trainT = 0;
-      Units.spawnSoldier();
+function updateSpecial(t: Structure, dt: number): void {
+  const L = t.level - 1;
+  const haste = Stat.haste();
+  const mdmg = Stat.magicDmg();
+  if (t.spin) {
+    if (t.kind === 'ballista') {
+      // rotated toward the target when firing
+    } else if (t.kind === 'fire') {
+      const s = (0.8 + t.level * 0.1) * (1 + Math.sin(G.time * 14 + t.x) * 0.08);
+      t.spin.scale.set(s, s * (1 + Math.sin(G.time * 9) * 0.1), s);
+    } else {
+      t.spin.rotation.y += dt * (t.frozenT > 0 ? 0.2 : 1.6);
+      t.spin.position.y = t.spinY + Math.sin(G.time * 2 + t.x) * 0.15;
     }
-  } else barracks.trainT = 0;
+  }
+  if (t.frozenT > 0) return;
+  t.cd -= dt * haste;
+  switch (t.kind) {
+    case 'frost': {
+      const aura = CFG.frost.aura[L];
+      const slow = CFG.frost.slow[L];
+      for (const e of enemies) {
+        if (e.alive && Math.hypot(e.x - t.x, e.z - t.z) < aura) applySlow(e, slow, 0.4);
+      }
+      if (t.cd > 0) return;
+      const [e] = nearestEnemies(t.x, t.z, CFG.frost.range[L], 1);
+      if (!e) {
+        t.cd = 0.2;
+        return;
+      }
+      t.cd = CFG.frost.interval[L];
+      Proj.magic(t.x, t.top, t.z, e, CFG.frost.dmg[L] * mdmg, 0x9fe8ff, false, (hit) => applySlow(hit as Enemy, slow + 0.1, 2.5));
+      Sfx.at('freeze', t.x, t.z, 0.4);
+      return;
+    }
+    case 'mage': {
+      if (t.cd > 0) return;
+      const [first] = nearestEnemies(t.x, t.z, CFG.mage.range[L], 1);
+      if (!first) {
+        t.cd = 0.2;
+        return;
+      }
+      t.cd = CFG.mage.interval[L];
+      let dmg = CFG.mage.dmg[L] * mdmg;
+      const hit = new Set<Enemy>();
+      let cur: Enemy | null = first;
+      let px = t.x, py = t.top, pz = t.z;
+      for (let j = 0; j < CFG.mage.jumps[L] && cur; j++) {
+        hit.add(cur);
+        lightning(px, py, pz, cur.x, cur.aimY, cur.z);
+        cur.damage(dmg, 'magic');
+        px = cur.x;
+        py = cur.aimY;
+        pz = cur.z;
+        dmg *= 0.85;
+        let next: Enemy | null = null;
+        let nd = 4.5;
+        for (const e of enemies) {
+          if (!e.alive || hit.has(e)) continue;
+          const d = Math.hypot(e.x - px, e.z - pz);
+          if (d < nd) {
+            nd = d;
+            next = e;
+          }
+        }
+        cur = next;
+      }
+      Sfx.at('zap', t.x, t.z, 0.8);
+      return;
+    }
+    case 'ballista': {
+      if (t.cd > 0) return;
+      const e = toughestEnemy(t.x, t.z, CFG.ballista.range[L]);
+      if (!e) {
+        t.cd = 0.2;
+        return;
+      }
+      t.cd = CFG.ballista.interval[L];
+      const lead = Math.hypot(e.x - t.x, e.z - t.z) / 40;
+      const tx = e.x + e.vx * lead;
+      const tz = e.z + e.vz * lead;
+      const ang = Math.atan2(tx - t.x, tz - t.z);
+      if (t.spin) t.spin.rotation.y = ang;
+      Proj.bolt(t.x, t.top, t.z, Math.sin(ang), Math.cos(ang), CFG.ballista.range[L] + 4, CFG.ballista.dmg[L] * Stat.towerDmg(), e.aimY);
+      Sfx.at('thunk', t.x, t.z, 0.9);
+      return;
+    }
+    case 'fire': {
+      if (t.cd > 0) return;
+      const e = densest(t.x, t.z, CFG.fire.range[L], 0, 6) ?? nearestEnemies(t.x, t.z, CFG.fire.range[L], 1)[0];
+      if (!e) {
+        t.cd = 0.2;
+        return;
+      }
+      t.cd = CFG.fire.interval[L];
+      const flight = Math.max(0.6, Math.hypot(e.x - t.x, e.z - t.z) / 16);
+      const fm = mdmg * Stat.holyFire();
+      Proj.fireball(t.x, t.top, t.z, e.x + e.vx * flight, e.z + e.vz * flight, e.flying ? e.aimY : 0.3, CFG.fire.dmg[L] * fm, CFG.fire.splash[L], CFG.fire.burn[L] * fm, flight);
+      Sfx.at('fire', t.x, t.z, 0.7);
+      return;
+    }
+    case 'spire': {
+      const R = CFG.spire.range[L];
+      const heal = CFG.spire.heal[L] * dt;
+      for (const u of defenders()) {
+        if (!u.alive || Math.hypot(u.x - t.x, u.z - t.z) > R) continue;
+        if (u === hero) hero.hp = Math.min(heroMaxHp(), hero.hp + heal * 2);
+        else (u as unknown as { heal(n: number): void }).heal(heal);
+      }
+      const rep = CFG.spire.repair[L] * dt;
+      for (const s of allStructures()) {
+        if (!s.alive || s === t || s.hp >= s.maxHp) continue;
+        const [ax, az] = aimPoint(t.x, t.z, s);
+        if (Math.hypot(ax - t.x, az - t.z) < R) s.hp = Math.min(s.maxHp, s.hp + s.maxHp * rep);
+      }
+      if (t.cd > 0) return;
+      const e = toughestEnemy(t.x, t.z, R + 3);
+      if (!e) {
+        t.cd = 0.3;
+        return;
+      }
+      t.cd = CFG.spire.interval;
+      beam(t.x, t.top, t.z, e.x, e.aimY, e.z, 0xffe27a, 0.35, 0.3);
+      beam(t.x, t.top, t.z, e.x, e.aimY, e.z, 0xffffff, 0.12, 0.25);
+      flash(e.x, e.aimY, e.z, 0xffe27a, 2, 0.3);
+      e.damage(CFG.spire.smite[L] * mdmg * Stat.holyFire(), 'holy');
+      Sfx.at('magic', t.x, t.z, 0.6);
+      return;
+    }
+  }
+}
+
+function updateTraps(dt: number): void {
+  const sm = Stat.siegeDmg();
+  for (const tr of traps) {
+    const L = tr.level - 1;
+    if (tr.kind === 'spikes') {
+      tr.cd -= dt;
+      if (tr.spikes) {
+        tr.thrust = Math.max(0, tr.thrust - dt * 4);
+        tr.spikes.scale.y = 0.4 + tr.thrust * 0.8;
+      }
+      if (tr.cd > 0) continue;
+      const R = CFG.spikes.radius;
+      let any = false;
+      for (const e of enemies) {
+        if (!e.alive || e.flying || Math.hypot(e.x - tr.x, e.z - tr.z) > R + e.r * 0.5) continue;
+        e.damage(CFG.spikes.dmg[L] * sm, 'melee');
+        any = true;
+      }
+      if (any) {
+        tr.cd = CFG.spikes.interval;
+        tr.thrust = 1;
+        Sfx.at('stab', tr.x, tr.z, 0.5);
+      } else tr.cd = 0.1;
+    } else {
+      const R = CFG.tar.radius;
+      const burn = CFG.tar.burn[L] * sm;
+      for (const e of enemies) {
+        if (!e.alive || e.flying || Math.hypot(e.x - tr.x, e.z - tr.z) > R) continue;
+        applySlow(e, CFG.tar.slow[L], 0.35);
+        if (burn > 0) e.burn(burn, 1.5);
+      }
+    }
+  }
+}
+
+function updateBarracks(dt: number): void {
+  for (const b of [barracks, range]) {
+    if (b.level <= 0) continue;
+    const ranged = b === range;
+    const cap = Units.soldierCap(ranged);
+    const list = ranged ? rangers : soldiers;
+    const alive = list.filter((s) => s.alive).length;
+    if (alive < cap) {
+      b.trainT += dt;
+      const need = ranged ? CFG.ranger.train * (1 - 0.08 * G.research.drill) : Stat.trainTime();
+      if (b.trainT >= need) {
+        b.trainT = 0;
+        Units.spawnSoldier(ranged);
+      }
+    } else b.trainT = 0;
+  }
 }
 
 function updateBars(dt: number): void {
-  const all: Structure[] = [S.keep, ...S.towers];
-  for (const w of S.walls) if (w) all.push(w);
-  if (S.catapult) all.push(S.catapult);
-  for (const s of all) {
+  for (const s of allStructures()) {
     if (!s.alive) {
       s.bar.hide();
       continue;
     }
-    const y = s.kind === 'wall' ? 3.8 : s.kind === 'keep' ? s.top + 4.5 : s.top + 1.4;
+    if (s.frozenT > 0) {
+      s.frozenT -= dt;
+      if (Math.random() < dt * 3) burst(s.x, s.top, s.z, 0xbff4ff, 1, { glow: true, speed: 1, up: 1 });
+    }
+    const y = s.kind === 'wall' ? 4.2 : s.kind === 'keep' ? s.top + 4.5 : s.top + 1.4;
     s.bar.set(s.hp / s.maxHp, s.x, y, s.z);
     if (s.flashT > 0) s.flashT -= dt;
-    const want = s.flashT > 0;
-    if (want !== s.flashing && s.mesh) {
-      s.flashing = want;
-      setObjFlash(s.mesh, want);
-    }
+    setStructMat(s, s.flashT > 0 ? Mat.flash : s.frozenT > 0 ? Mat.frozen : null);
   }
 }
 
@@ -531,6 +945,13 @@ export function updateStructures(dt: number): void {
   updateMarket(dt);
   updateTowers(dt);
   updateCatapult(dt);
+  for (const t of S.special) if (t.alive) updateSpecial(t, dt);
+  updateTraps(dt);
   updateBarracks(dt);
   updateBars(dt);
+}
+
+/** Visual-only: show a burst ring for an ability or event at the wall. */
+export function wallFx(color: number): void {
+  for (const w of S.walls) if (w?.alive) ring(w.x, w.z, color, 5, 0.6);
 }

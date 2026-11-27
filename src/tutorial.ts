@@ -5,6 +5,8 @@ import { market } from './structures';
 import { getSlot, slots, costOf, nameOf, type Slot } from './pads';
 import { Waves } from './waves';
 import { on } from './events';
+import { pendingChoices } from './progress';
+import { nearestChest } from './happenings';
 
 export interface Objective {
   text: string;
@@ -59,8 +61,10 @@ export function updateTutorial(): Objective {
 
   if (G.phase === 'wave') {
     const n = Waves.remaining();
-    return { text: `Defend the keep! ${n} raider${n === 1 ? '' : 's'} left`, target: null };
+    const word = G.wave <= 20 ? (n === 1 ? 'raider' : 'raiders') : n === 1 ? 'enemy' : 'enemies';
+    return { text: `Defend the keep! ${n} ${word} left`, target: null };
   }
+  if (G.phase !== 'build') return { text: '', target: null };
 
   switch (G.tut) {
     case 0:
@@ -85,8 +89,17 @@ export function updateTutorial(): Objective {
   if (newest && G.time < newest.until && newest.slot.visible) {
     return { text: `New: ${nameOf(newest.slot)}`, target: padTarget(newest.slot) };
   }
+  const picks = pendingChoices();
+  if (picks > 0) return { text: G.pendingRelics > 0 ? 'A relic awaits! Press L or tap ⭐ to claim it' : `Level up! Press L or tap ⭐ to choose a perk${picks > 1 ? ` (${picks})` : ''}`, target: null };
   if (hero.stack.length >= capacity()) return { text: 'Backpack full — sell at the market', target: market.drop };
   if (market.pile >= 30) return { text: `${market.pile} coins waiting at the market`, target: market.coin };
+  const chest = nearestChest();
+  if (chest && Math.hypot(chest.x - hero.x, chest.z - hero.z) < 34) return { text: 'A treasure chest is nearby!', target: chest };
+  if (G.flags.merchant) {
+    const m = getSlot('merchant1');
+    if (m?.visible && G.time % 20 < 6) return { text: 'The merchant has rare goods by the keep', target: padTarget(m) };
+  }
+  if (G.happening === 'rush' && hero.stack.length) return { text: 'Gold Rush! Sell now for 50% more', target: market.drop };
   let cheapest: Slot | null = null;
   for (const s of slots) {
     if (!s.visible) continue;

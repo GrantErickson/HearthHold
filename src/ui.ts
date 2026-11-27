@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { scene } from './engine';
-import { G } from './state';
-import { CFG } from './config';
+import { G, actOf } from './state';
+import { CFG, ACTS, MODS, PERKS, RELICS, isBossWave, bossName } from './config';
 import { hero, capacity, maxHp, respawnIn } from './hero';
 import { S } from './structures';
 import { Units } from './units';
@@ -12,6 +12,10 @@ import { Sfx } from './audio';
 import { on } from './events';
 import { nameOf, type Slot } from './pads';
 import { Save } from './save';
+import { Env } from './env';
+import { currentOffer, takeChoice, pendingChoices, xpRatio, type Choice } from './progress';
+import { ABILITIES, ABILITY_INFO, blocked, cast, cooldown, maxCd, unlocked, type AbilityId } from './abilities';
+import type { HappeningInfo } from './happenings';
 import type { Objective } from './tutorial';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
@@ -30,9 +34,10 @@ export interface UIHandlers {
   endless(): void;
   toMenu(): void;
   toggleMute(): void;
+  cycleSpeed(dir: number): void;
 }
 
-type ScreenId = 'menu' | 'pause' | 'over' | 'win' | 'fatal';
+type ScreenId = 'menu' | 'pause' | 'over' | 'win' | 'fatal' | 'choose';
 
 const lastText = new WeakMap<HTMLElement, string>();
 function setText(el: HTMLElement, s: string): void {
@@ -47,13 +52,17 @@ function setWidth(el: HTMLElement, ratio: number): void {
 }
 
 let els: Record<string, HTMLElement> = {};
+let handlers: UIHandlers | null = null;
 let marker: THREE.Group | null = null;
 let pointer: THREE.Group | null = null;
 let lastCoins = 0;
-const bannerQueue: { title: string; sub: string; cls: string }[] = [];
+const bannerQueue: { title: string; sub: string; cls: string; dur: number }[] = [];
 let bannerT = 0;
 let toastT = 0;
 let confirmNew = false;
+let choosing = false;
+let screen: ScreenId | null = null;
+const abilityEls = new Map<AbilityId, { btn: HTMLButtonElement; cd: HTMLElement; lock: HTMLElement }>();
 
 function showBanner(): void {
   const b = bannerQueue.shift();
@@ -62,21 +71,108 @@ function showBanner(): void {
   setText(els.bannerTitle, b.title);
   setText(els.bannerSub, b.sub);
   el.className = 'show ' + b.cls;
-  bannerT = 2.6;
+  bannerT = b.dur;
 }
 
 function fmtStats(): string {
   const s = G.stats;
-  return `Raiders defeated: ${s.kills.toLocaleString()} · Coins earned: ${s.earned.toLocaleString()} · Things built: ${s.built}`;
+  return `Enemies defeated: ${s.kills.toLocaleString()} · Bosses slain: ${s.bosses} · Coins earned: ${s.earned.toLocaleString()} · Things built: ${s.built} · Hero level ${G.level}`;
+}
+
+function buildAbilities(): void {
+  const box = els.abilities;
+  box.textContent = '';
+  for (const a of ABILITIES) {
+    const info = ABILITY_INFO[a];
+    const btn = document.createElement('button');
+    btn.className = 'ability';
+    btn.title = `${info.name} (${info.key}) — ${info.desc}`;
+    btn.setAttribute('aria-label', `${info.name}, key ${info.key}`);
+    const ico = document.createElement('span');
+    ico.className = 'emoji ico';
+    ico.textContent = info.icon;
+    const key = document.createElement('span');
+    key.className = 'key';
+    key.textContent = info.key;
+    const cd = document.createElement('span');
+    cd.className = 'cd';
+    const lock = document.createElement('span');
+    lock.className = 'lock';
+    btn.append(ico, cd, key, lock);
+    btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      Sfx.unlock();
+      UI.useAbility(a);
+    });
+    box.appendChild(btn);
+    abilityEls.set(a, { btn, cd, lock });
+  }
+}
+
+function heroSheet(): void {
+  const el = els.heroSheet;
+  el.textContent = '';
+  const add = (title: string, items: string[]) => {
+    if (!items.length) return;
+    const h = document.createElement('h3');
+    h.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = items.join(' · ');
+    el.append(h, p);
+  };
+  add(`Hero level ${G.level}`, Object.entries(G.perks).map(([id, n]) => `${PERKS[id]?.icon ?? ''} ${PERKS[id]?.name ?? id}${n > 1 ? ` ×${n}` : ''}`));
+  add('Relics', G.relics.map((id) => `${RELICS[id]?.icon ?? ''} ${RELICS[id]?.name ?? id}`));
+  const r = G.research;
+  add('Research', (Object.keys(r) as (keyof typeof r)[]).filter((k) => r[k] > 0).map((k) => (k === 'glory' ? `🌟 Glory ${r[k]}` : `${k[0].toUpperCase()}${k.slice(1)} ${r[k]}/5`)));
+}
+
+function renderChoices(): void {
+  const offer = currentOffer();
+  if (!offer) {
+    UI.closeChoices();
+    return;
+  }
+  const relic = offer[0].kind === 'relic';
+  setText(els.chooseCrest, relic ? '🏺' : '⭐');
+  setText(els.chooseTitle, relic ? 'A relic of power!' : `Level ${G.level}!`);
+  const left = pendingChoices();
+  setText(els.chooseSub, relic ? 'Choose one relic to keep forever' : `Choose a perk${left > 1 ? ` · ${left} to pick` : ''}`);
+  const box = els.chooseCards;
+  box.textContent = '';
+  offer.forEach((c: Choice, i) => {
+    const b = document.createElement('button');
+    b.className = 'pick' + (relic ? ' relic' : '');
+    const ico = document.createElement('div');
+    ico.className = 'emoji pick-ico';
+    ico.textContent = c.def.icon;
+    const name = document.createElement('div');
+    name.className = 'pick-name';
+    name.textContent = c.def.name;
+    const desc = document.createElement('div');
+    desc.className = 'pick-desc';
+    desc.textContent = c.def.desc;
+    const meta = document.createElement('div');
+    meta.className = 'pick-meta';
+    meta.textContent = relic ? 'Relic' : `${c.stacks}/${c.def.max}  ·  key ${i + 1}`;
+    b.append(ico, name, desc, meta);
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      UI.pick(i);
+    });
+    box.appendChild(b);
+  });
 }
 
 export const UI = {
   init(h: UIHandlers): void {
+    handlers = h;
     const ids = [
-      'hud', 'coinPill', 'coinVal', 'carryPill', 'carryVal', 'hpPill', 'hpBar', 'objective', 'objText', 'waveCard', 'waveTitle',
-      'waveSub', 'waveBar', 'callBtn', 'keepCard', 'keepBar', 'bossCard', 'bossName', 'bossBar', 'pauseBtn', 'muteBtn', 'banner',
-      'bannerTitle', 'bannerSub', 'toast', 'btnContinue', 'btnPlay', 'btnHow', 'how', 'btnResume', 'btnRestart', 'btnMenu',
-      'btnMute2', 'overTitle', 'overStats', 'btnRetry', 'btnNew2', 'winStats', 'btnEndless', 'btnNew3', 'fatalMsg',
+      'hud', 'coinPill', 'coinVal', 'carryPill', 'carryVal', 'hpPill', 'hpBar', 'lvlPill', 'lvlVal', 'xpBar', 'lvlNew', 'objective', 'objText', 'buffs',
+      'waveCard', 'waveAct', 'waveTitle', 'waveSub', 'waveMod', 'waveBar', 'callBtn', 'keepCard', 'keepBar', 'bossCard', 'bossName', 'bossBar', 'bossShield',
+      'speedBtn', 'pauseBtn', 'muteBtn', 'abilities', 'banner', 'bannerTitle', 'bannerSub', 'toast', 'btnContinue', 'btnPlay', 'btnHow', 'how', 'btnResume',
+      'btnRestart', 'btnMenu', 'btnMute2', 'heroSheet', 'overTitle', 'overStats', 'btnRetry', 'btnNew2', 'winStats', 'btnEndless', 'btnNew3', 'fatalMsg',
+      'chooseCrest', 'chooseTitle', 'chooseSub', 'chooseCards', 'btnLater', 'vignette',
     ];
     els = {};
     for (const id of ids) els[id] = $(id);
@@ -109,8 +205,13 @@ export const UI = {
     click('btnNew3', h.newGame);
     click('pauseBtn', h.pause);
     click('muteBtn', h.toggleMute);
+    click('speedBtn', () => h.cycleSpeed(1));
     click('callBtn', () => Waves.callEarly());
+    click('lvlPill', () => UI.openChoices());
+    click('btnLater', () => UI.closeChoices());
+    for (const id of ['lvlPill', 'speedBtn', 'pauseBtn', 'muteBtn', 'callBtn']) els[id].addEventListener('pointerdown', (e) => e.stopPropagation());
 
+    buildAbilities();
     marker = makeMarker();
     marker.visible = false;
     pointer = makePointer();
@@ -123,12 +224,36 @@ export const UI = {
     });
     on('waveStart', (w) => {
       const n = w as number;
-      const boss = n >= 20 && n % 10 === 0 ? 'The Warlord himself is coming!' : n >= 10 && n % 5 === 0 ? 'A Chieftain leads the attack!' : 'Raiders incoming from the north!';
-      UI.banner(`Wave ${n}`, boss, 'red');
+      const m = MODS[G.mod];
+      let sub = n % 10 === 0 ? `${bossName(n)} leads the attack!` : isBossWave(n) ? 'Champions lead the attack!' : 'Enemies incoming from the north!';
+      if (m) sub = `${m.icon} ${m.name} — ${m.desc}`;
+      UI.banner(`Wave ${n}`, sub, m?.name === 'Blood Moon' ? 'red blood' : 'red');
     });
     on('waveClear', (info) => {
       const i = info as WaveClearInfo;
       UI.banner(`Wave ${i.wave} cleared!`, `+${i.bonus} coins · repairs done`, 'gold');
+    });
+    on('actStart', (a) => {
+      const act = ACTS[(a as number) - 1];
+      UI.banner(`Act ${['I', 'II', 'III', 'IV', 'V'][(a as number) - 1]}: ${act.name}`, act.sub, 'act', 4.2);
+      Sfx.play('act');
+    });
+    on('happening', (arg) => {
+      if (arg && typeof arg === 'object') {
+        const hp = arg as HappeningInfo;
+        UI.banner(hp.title, hp.sub, 'gold', 2.6);
+      }
+    });
+    on('levelUp', () => {
+      if (G.autotest) return;
+      Sfx.play('levelup');
+      UI.toast(`Level ${G.level}! Press L or tap ⭐ to pick a perk`);
+      els.lvlPill.classList.remove('bump');
+      void els.lvlPill.offsetWidth;
+      els.lvlPill.classList.add('bump');
+    });
+    on('bossKilled', () => {
+      if (!G.autotest) UI.toast('A relic fell from the boss — claim it after the wave!');
     });
     on('structureLost', () => UI.toast('A defense fell — rebuild it at half price'));
     UI.refreshSound();
@@ -138,7 +263,7 @@ export const UI = {
   refreshMenu(): void {
     const d = Save.read();
     els.btnContinue.hidden = !d;
-    if (d) setText(els.btnContinue, `Continue — Wave ${d.wavesCleared + 1}`);
+    if (d) setText(els.btnContinue, `Continue — Wave ${d.wavesCleared + 1} · Lv ${d.level}`);
     setText(els.btnPlay, d ? 'New game' : 'Play');
   },
 
@@ -148,14 +273,26 @@ export const UI = {
     setText(els.btnMute2, m ? 'Sound: off' : 'Sound: on');
   },
 
+  refreshSpeed(): void {
+    setText(els.speedBtn, `${G.speed}×`);
+    els.speedBtn.classList.toggle('fast', G.speed > 1);
+  },
+
   showScreen(id: ScreenId | null): void {
+    screen = id;
+    if (id === 'pause') heroSheet();
     for (const s of document.querySelectorAll<HTMLElement>('.screen')) s.hidden = s.id !== id;
+  },
+
+  get screen(): ScreenId | null {
+    return screen;
   },
 
   enterGame(): void {
     UI.showScreen(null);
     els.hud.hidden = false;
     lastCoins = G.coins;
+    UI.refreshSpeed();
   },
 
   showOver(): void {
@@ -182,15 +319,60 @@ export const UI = {
     els.banner.className = '';
   },
 
-  banner(title: string, sub: string, cls = ''): void {
-    bannerQueue.push({ title, sub, cls });
+  banner(title: string, sub: string, cls = '', dur = 2.6): void {
+    if (G.autotest) return;
+    bannerQueue.push({ title, sub, cls, dur });
     if (bannerT <= 0) showBanner();
   },
 
   toast(msg: string): void {
+    if (G.autotest) return;
     setText(els.toast, msg);
     els.toast.classList.add('show');
     toastT = 2.6;
+  },
+
+  /** Perk / relic picker. Pauses the game while open. */
+  openChoices(): void {
+    if (choosing || !pendingChoices() || (G.phase !== 'build' && G.phase !== 'wave')) return;
+    if (G.paused && screen !== null) return;
+    choosing = true;
+    G.paused = true;
+    renderChoices();
+    UI.showScreen('choose');
+  },
+
+  closeChoices(): void {
+    if (!choosing) return;
+    choosing = false;
+    handlers?.resume();
+  },
+
+  get choosing(): boolean {
+    return choosing;
+  },
+
+  pick(i: number): void {
+    if (!choosing) return;
+    const offer = currentOffer();
+    const c = offer?.[i];
+    if (!c) return;
+    takeChoice(c);
+    Sfx.play(c.kind === 'relic' ? 'relic' : 'levelup');
+    if (pendingChoices() > 0) renderChoices();
+    else UI.closeChoices();
+  },
+
+  useAbility(a: AbilityId): void {
+    if (G.paused) return;
+    const why = blocked(a);
+    if (why) {
+      if (unlocked(a) && why !== '…') UI.toast(`${ABILITY_INFO[a].name}: ${why}`);
+      else if (!unlocked(a)) UI.toast(`${ABILITY_INFO[a].name} unlocks at hero level ${CFG.ability[a].level}`);
+      Sfx.play('deny');
+      return;
+    }
+    cast(a);
   },
 
   update(dt: number, obj: Objective | null): void {
@@ -220,21 +402,34 @@ export const UI = {
     setText(els.carryVal, `${hero.stack.length}/${cap}`);
     els.carryPill.classList.toggle('full', hero.stack.length >= cap);
     setWidth(els.hpBar, hero.alive ? hero.hp / maxHp() : 0);
+    setText(els.lvlVal, String(G.level));
+    setWidth(els.xpBar, xpRatio());
+    const pend = pendingChoices();
+    els.lvlNew.hidden = pend === 0;
+    els.lvlPill.classList.toggle('ready', pend > 0);
 
+    const next = G.wavesCleared + 1;
+    const w = G.phase === 'wave' ? G.wave : next;
+    setText(els.waveAct, `Act ${['I', 'II', 'III', 'IV', 'V'][actOf(w) - 1]} · ${ACTS[actOf(w) - 1].name}`);
     if (G.phase === 'build') {
-      const next = G.wavesCleared + 1;
       setText(els.waveTitle, G.endless ? `Wave ${next}` : `Wave ${next} of ${CFG.totalWaves}`);
       const running = Waves.timerRunning();
-      setText(els.waveSub, running ? `Raiders arrive in ${fmtTime(G.buildTimer)}` : 'Raiders are gathering…');
+      setText(els.waveSub, running ? `Enemies arrive in ${fmtTime(G.buildTimer)}` : 'Raiders are gathering…');
       setWidth(els.waveBar, running ? 1 - G.buildTimer / G.buildTotal : 0);
       els.callBtn.hidden = !running;
       if (running) setText(els.callBtn, `Call now +${Waves.earlyBonus()}`);
+      const pv = Waves.preview(next);
+      els.waveMod.hidden = !pv;
+      if (pv) setText(els.waveMod, `Next: ${pv}`);
     } else if (G.phase === 'wave') {
-      setText(els.waveTitle, `Wave ${G.wave}`);
+      setText(els.waveTitle, G.endless ? `Wave ${G.wave}` : `Wave ${G.wave} of ${CFG.totalWaves}`);
       const rem = Waves.remaining();
-      setText(els.waveSub, `${rem} raider${rem === 1 ? '' : 's'} left`);
+      setText(els.waveSub, `${rem} enem${rem === 1 ? 'y' : 'ies'} left`);
       setWidth(els.waveBar, 1 - rem / Math.max(1, G.waveTotal));
       els.callBtn.hidden = true;
+      const m = MODS[G.mod];
+      els.waveMod.hidden = !m;
+      if (m) setText(els.waveMod, `${m.icon} ${m.name}`);
     }
     els.waveCard.classList.toggle('fighting', G.phase === 'wave');
 
@@ -245,9 +440,35 @@ export const UI = {
     const b = Units.boss();
     els.bossCard.hidden = !b;
     if (b) {
-      setText(els.bossName, b.d.name);
+      setText(els.bossName, b.title);
       setWidth(els.bossBar, b.hp / b.maxHp);
+      setWidth(els.bossShield, b.shieldHp / b.shieldMax);
     }
+
+    // Buff chips
+    const buffs: string[] = [];
+    if (G.buffs.warcry > 0) buffs.push(`📣 War Cry ${Math.ceil(G.buffs.warcry)}s`);
+    if (G.buffs.fury > 0) buffs.push('🧪 Fury');
+    if (G.happening === 'rush') buffs.push('✨ Gold Rush');
+    if (G.speed > 1) buffs.push(`⏩ ${G.speed}× speed`);
+    setText(els.buffs, buffs.join('   '));
+    els.buffs.hidden = !buffs.length;
+
+    for (const a of ABILITIES) {
+      const e = abilityEls.get(a);
+      if (!e) continue;
+      const un = unlocked(a);
+      e.btn.classList.toggle('locked', !un);
+      const cd = cooldown(a);
+      const ratio = un && cd > 0 ? cd / maxCd(a) : 0;
+      e.cd.style.setProperty('--p', `${(ratio * 360).toFixed(0)}deg`);
+      setText(e.lock, !un ? `Lv ${CFG.ability[a].level}` : cd > 0 ? String(Math.ceil(cd)) : '');
+      e.btn.classList.toggle('ready', un && cd <= 0 && G.phase === 'wave' && !blocked(a));
+    }
+
+    const danger = G.phase === 'wave' && kr < 0.35 ? 0.5 + Math.sin(G.time * 6) * 0.15 : 0;
+    els.vignette.style.opacity = String(Math.max(Env.night * 0.55, danger).toFixed(2));
+    els.vignette.classList.toggle('danger', danger > 0);
 
     const objText = hero.alive ? obj?.text ?? '' : `You fell! Back in ${Math.ceil(respawnIn())}…`;
     setText(els.objText, objText);

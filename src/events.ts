@@ -6,7 +6,12 @@ export type GameEvent =
   | 'waveStart'
   | 'waveClear'
   | 'victory'
-  | 'structureLost';
+  | 'structureLost'
+  | 'levelUp'
+  | 'statsChanged'
+  | 'bossKilled'
+  | 'actStart'
+  | 'happening';
 
 type Handler = (arg?: unknown) => void;
 const handlers = new Map<GameEvent, Handler[]>();

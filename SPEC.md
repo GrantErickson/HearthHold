@@ -1,273 +1,210 @@
 # Hearthold — Game Spec
 
 A browser game in the "carry, sell, build" style seen in mobile base-builder ads.
-You run around a small medieval village, chop and mine resources, drop them at the
+You run around a medieval village, chop and mine resources, drop them at the
 market for coins, and spend coins by standing on build pads. What you build
-defends the keep against waves of raiders that grow stronger each round.
+defends the keep through **100 waves in five acts**, each with new enemies, a
+new look and a boss every ten waves.
 
 All names, characters, models and sounds are original. **No ads, no tracking,
 no accounts.** Progress is stored only in the player's browser.
 
 ---
 
-## 1. Decisions (from Q&A)
+## 1. Decisions
 
 | Topic | Decision |
 |---|---|
 | Setting | Medieval village |
 | Pressure | Enemy waves on a timer, each bigger than the last |
-| Visuals | Low-poly 3D (Three.js), tilted camera following the hero |
-| Devices | Desktop (keyboard) and phone (touch joystick) |
-| Length | 20 waves, wave 20 has the Warlord boss; endless mode afterwards |
+| Visuals | Low-poly 3D (Three.js), tilted camera following the hero; day for building, dusk/night for fighting |
+| Devices | Desktop (keyboard) and phone (touch joystick + on-screen ability buttons) |
+| Length | 100 waves in 5 acts (≈5× the original 20). Boss every 10 waves, champions every 5. Endless mode afterwards |
 | Losing | Keep destroyed = game over; retry from the start of that wave (auto-save) |
-| Automation | Hire lumberjacks and miners who gather and deliver on their own |
+| Progression | Hero XP + perk picks, abilities, boss relics, equipment, research, keep levels, repeatable Glory |
+| Speed | 1×, 1.5×, 2×, 3× (remembered); the simulation sub-steps so 3× plays like 1× |
 | Tech | Vite + TypeScript, Three.js from npm, static build output (`dist/`) |
 
 ## 2. Tech
 
 - Vite 6 + TypeScript 5 (strict), Three.js r170. No backend.
-- `npm run dev` for local play with hot reload, `npm run build` type-checks and
-  produces a static `dist/` folder that can be hosted anywhere (GitHub Pages,
-  Netlify, any static host).
 - All 3D models are built in code from primitives (no asset files), merged into
-  one geometry per model with vertex colors to keep draw calls low.
-- Sound effects are synthesized with the Web Audio API (no audio files).
-- One web font (Lilita One from Google Fonts) with a system-font fallback.
-- Save data: `localStorage` key `hearthold-save-v1`; every read/write is
-  wrapped so the game still runs if storage is blocked.
+  one geometry per model with vertex colours **and a per-vertex glow value**.
+  Static models get baked ambient occlusion (darker near the ground).
+- One shared shader extension (injected into `MeshLambertMaterial`) adds:
+  wind sway for trees and grass, act seasons (autumn/grey/winter tints on leafy
+  colours), snow on upward faces, self-lit glow (torches, crystals, runes, eyes)
+  and windows that light up at night.
+- Particles and health bars are instanced (a handful of draw calls in total).
+  Every material variant is compiled at boot to avoid mid-battle hitches.
+- Sound effects are synthesized with the Web Audio API (no audio files). No
+  sound is scheduled until a user gesture has started the audio context.
+- Save data: `localStorage` key `hearthold-save-v2` (v1 saves from the 20-wave
+  version are ignored). Every read/write is wrapped.
 
 ## 3. Controls
 
 | Action | Desktop | Phone |
 |---|---|---|
-| Move | WASD or arrow keys (mouse drag also works) | Touch anywhere and drag (floating joystick) |
-| Chop / mine | Automatic when next to a tree or rock | same |
-| Attack | Automatic when an enemy is in reach | same |
+| Move | WASD / arrows (mouse drag works too) | Touch and drag (floating joystick) |
+| Chop / mine / attack | Automatic | same |
 | Sell / collect / buy | Stand on the pad | same |
-| Pause | `Esc` or `P`, or the pause button | Pause button |
-| Mute | `M`, or the speaker button | Speaker button |
-
-The game auto-pauses when the tab is hidden.
+| Abilities | Q Whirlwind · E War Cry · R Meteor · F Bastion | Ability buttons |
+| Choose perk / relic | L (1/2/3 to pick) or click the level badge | Tap the level badge |
+| Game speed | `[` / `]` (also `-` / `=`) or the speed button | Speed button |
+| Call the wave early | Space / Enter or the button | Button |
+| Zoom | Mouse wheel | — |
+| Pause / mute | Esc or P / M | Buttons |
 
 ## 4. Core loop
 
-1. **Gather** — walk next to a tree (wood) or rock (stone, gold). The hero swings
-   automatically and each swing adds one item to the stack on their back. The
-   backpack has a capacity (starts at 8). Depleted nodes regrow after a while.
-2. **Sell** — stand on the market's **SELL** pad; items fly off the stack into
-   the market one by one. The market turns each item into coins over time.
-3. **Collect** — coins pile up on the market's **COINS** pad. Stand on it to
-   scoop them into your purse.
-4. **Build** — build pads show an icon and a price. Stand on one and coins flow
-   into it. Partial payments are kept, so you can pay in installments. When it's
-   paid, the building pops up and new pads may appear.
-5. **Defend** — when the countdown ends, raiders march in from the north. Walls
-   block them, towers and soldiers shoot and fight, and the hero fights too.
-   Clearing a wave pays a bonus, repairs damage and starts the next countdown.
-
-Progression comes from pads unlocking over time (by waves cleared, keep level,
-and what's already built), so the village keeps growing and there's always a
-next thing to save up for.
+1. **Gather** wood, stone, gold ore and crystal (auto-harvest when close).
+2. **Sell** at the market's SELL pad; the market turns items into coins.
+3. **Collect** coins from the COINS pad.
+4. **Build** by standing on pads; partial payments are kept.
+5. **Defend** at dusk. Clearing a wave pays a bonus, repairs everything,
+   grants XP and starts the next day.
+6. **Grow the hero**: pick perks on level-up, claim relics after boss waves,
+   use abilities in battle.
 
 ## 5. World layout
 
 Top of the screen is north. Enemies enter from the north edge.
 
 ```
- z=-48  ~~~~~~~~~~~~~~ raider camp / spawn line ~~~~~~~~~~~~~~
-        .                 open field                         .
- z=-14  |==W0==|==W1==|==W2==|==W3==|==W4==|==W5==|   wall line (6 segments, 10 wide)
- z=-9         T1        T2     CAT    T3        T4      towers + catapult
-        forest |                                  |
-        (wood) | MktUp  [MARKET]      [SMITH] Boots| quarry
-               | Pack   SELL COINS  Sword Armor Tools (stone)
-               |              KeepUp               |
-               | BarracksPad  [ KEEP ]             | GoldPad
-               |  [BARRACKS]  [      ]             | gold mine
-               | LumberPad                MinerPad | (gold ore)
- z=29          | [LUMBER CAMP]        [MINERS' LODGE]
-        x=-30                     x=0                       x=30
+ z=-62  ~~~~~~~~~~~~~~~~ enemy camp / spawn line ~~~~~~~~~~~~~~~~
+ z=-27   [spikes]  [tar]   [spikes]   [tar]  [spikes]          traps in the field
+ z=-20  |==W0==|==W1==|==W2==|==W3==|==W4==|==W5==|           wall (6 × 10 wide)
+ z=-15  Fire  T1  Frost  T2  Ballista  T3  Mage  T4  Spire     tower row, 5 behind the wall
+ z=-9                    Catapult
+        forest |  MktUp [MARKET]   [SMITH] Boots | quarry
+               |  Pack  SELL COINS  Sword Armor Tools
+               | Merchant  KeepUp  Merchant      | GoldPad
+               | [BARRACKS] [KEEP] [ARCHERY]     | gold mine
+               | LumberPad  Academy  MinerPad    |
+ z=22          | [LUMBER]  research pads [MINERS]|
+ z=25          |          [ACADEMY]              |
+ z=30          |            Glory      CrystalPad| crystal cavern
+        x=-30                    x=0                          x=30
 ```
 
-- Map bounds: x −29.5…29.5, z −48…29.5. Mountains and dense trees frame the edges.
-- Keep at (0, 13). The hero starts in the plaza at (0, 3).
-- Forest (west): x ≤ −15.5, about 50 trees.
-- Quarry (east): rocks appear when the quarry is opened.
-- Gold field (south-east): gold veins appear when the gold mine is opened.
+- Map bounds: x −29.5…29.5, z −64…39.5.
+- Forest (west), quarry (east), gold field (south-east), crystal field (far south-east).
+- Torches line the back of the wall; lamps and windows light up the village at night.
 
 ## 6. Resources
 
-| Resource | Source | Unlock | Sell value | Units per node | Regrow | Harvest time |
-|---|---|---|---|---|---|---|
-| Wood 🪵 | Trees | Start | 4 | 5 | 18 s | 1.0× |
-| Stone 🪨 | Rocks | Open Quarry | 9 | 4 | 28 s | 1.5× |
-| Gold ore 🔶 | Gold veins | Open Gold Mine | 22 | 3 | 40 s | 2.2× |
+| Resource | Unlock | Sell value | Units per node | Regrow | Harvest time |
+|---|---|---|---|---|---|
+| Wood 🪵 | Start | 4 | 5 | 18 s | 1.0× |
+| Stone 🪨 | Open Quarry (Keep 2) | 9 | 4 | 28 s | 1.5× |
+| Gold ore 🔶 | Open Gold Mine (Keep 3) | 22 | 3 | 40 s | 2.2× |
+| Crystal 💎 | Open Crystal Cavern (Keep 5) | 38 | 3 | 55 s | 3.0× |
 
-Base hero harvest time is 0.45 s per item, improved by Tools upgrades.
+Market levels multiply value ×1 / 1.2 / 1.4 / 1.6 / 1.8. Commerce research and
+the Haggler perk add more; a **Gold Rush** makes everything sell for +50%.
 
-## 7. Build pads
+## 7. Buildings, defenses and upgrades
 
-- 2.6 × 2.6 tiles on the ground with a dashed border, icon and remaining cost.
-  A floating name label appears when the hero is nearby.
-- A pad pulls coins at about `max(30, cost × 1.1)` per second while you stand
-  on it, so any affordable pad finishes in about a second.
-- Unbuilt buildings show a translucent preview of what you're buying.
-- Multi-stage pads (upgrades, hires) reappear showing the next stage once its
-  requirement is met.
-- Destroyed walls, towers and catapults leave rubble and a **Rebuild** pad at
-  50% of the last stage's price.
+All costs and unlocks live in `src/pads.ts`; stats live in `src/config.ts`.
 
-## 8. Buildings and upgrades
-
-"Wave N" means N waves cleared. All costs are in coins.
-
-| Pad | Stages (cost → effect) | Unlock |
+| Pad | Stages | Unlock |
 |---|---|---|
-| Market | Pre-built. SELL + COINS pads | Start |
-| Market upgrade | Lv2 150 (2× speed, +25% value) · Lv3 500 (3× speed, +50%) | Wave 2 · Keep 3 |
-| Backpack | 60 → 14 · 180 → 22 · 450 → 32 · 900 → 45 capacity | First sale · Wave 2 · Keep 2 · Keep 3 |
-| Walls W2, W3 (center) | Palisade 25 · Stone 80 · Fortified 220 · Iron 480 | Start · Keep 2 · Keep 3 · Keep 4 |
-| Walls W1, W4 | same | Wave 1 for palisade |
-| Walls W0, W5 (outer) | same | Wave 3 for palisade |
-| Archer Towers T2, T3 | Build 50 · Lv2 160 · Lv3 420 | First wall · Wave 3 · Keep 3 |
-| Archer Towers T1, T4 | Build 90 · Lv2 160 · Lv3 420 | Wave 2 · Wave 3 · Keep 3 |
-| Keep | Lv2 200 · Lv3 700 · Lv4 1800 | Wave 3 · Wave 8 · Wave 13 |
-| Lumber Camp | Build 80, then hire lumberjacks 60 / 110 / 170 / 250 (max 4) | Wave 1 |
-| Blacksmith | Build 120 | Wave 2 |
-| ↳ Sword | 80 · 200 · 450 · 900 · 1600 (damage 12→18→26→38→54→75) | Blacksmith; later tiers need Keep 2/3/4 |
-| ↳ Armor | 90 · 240 · 550 · 1100 (HP 100→150→220→320→450) | Blacksmith; Keep 2/3 |
-| ↳ Boots | 100 · 300 · 700 (speed 6→7→8→9.2) | Blacksmith; Keep 2/3 |
-| ↳ Tools | 70 · 200 · 500 (harvest 0.45→0.36→0.28→0.21 s) | Blacksmith; Keep 2 |
-| Open Quarry | 120 → rocks appear | Keep 2 |
-| Miners' Lodge | Build 200, then hire miners 120 / 200 / 300 / 450 (max 4) | Quarry open |
-| Open Gold Mine | 450 → gold veins appear; miners prefer gold | Keep 3 |
-| Barracks | Build 250 (2 soldiers) · Lv2 300 (4) · Lv3 700 (6) · Lv4 1400 (8) | Keep 2 · Keep 2 · Keep 3 · Keep 4 |
-| Catapult | Build 900 · Heavy 2000 | Keep 3 · Keep 4 |
+| Walls ×6 | Palisade 25 · Stone 80 · Fortified 220 · Iron 480 · **Runic** 1200 (reflects 20%) · **Adamant** 2600 (reflects 35%) | waves 0/1/3, then Keep 2–6 |
+| Archer Towers ×4 | Build 50/90 · Lv2 160 · Lv3 420 · Lv4 1500 · Lv5 3500 (3 arrows) | first wall / wave 2, then wave 3 / Keep 3 / 5 / 6 |
+| **Ballista** | 1100 · 2200 · 4500 · 9000 — piercing bolts, picks the toughest target | wave 16 |
+| **Frost Tower** | 1400 · 2800 · 6000 — slowing aura + frost bolts | wave 22 |
+| **Mage Tower** | 2000 · 3500 · 7000 · 13000 — chain lightning (ignores armor) | wave 26 |
+| **Fire Tower** | 2600 · 4500 · 9000 · 16000 — fireballs that set groups alight | wave 32 |
+| **Holy Spire** | 5000 · 9000 · 16000 — heals troops, mends walls, smites (×2 vs undead) | wave 44 |
+| **Spike Pits** ×3 | 150 · 400 · 1100 · 3000 — damage everything walking over | waves 5 / 7 / 9 |
+| **Tar Pits** ×2 | 500 · 1400 · 3500 — slow, Lv3 burns | wave 18 |
+| Catapult | 900 · 2000 · **Great Trebuchet** 6000 | Keep 3 / 4 / 6 |
+| Keep | Lv2 200 … Lv8 26000 (HP 600 → 12000, arrows from Lv3) | waves 3, 8, 13, 24, 38, 55, 72 |
+| Barracks | 6 levels: 2 → 12 soldiers | Keep 2–6 |
+| **Archery Range** | 4 levels: 2 → 6 rangers shooting from behind the wall | Keep 3–6 |
+| Lumber Camp / Miners' Lodge | Build, then hire up to 6 workers each (hires 5–6 need Keep 5) | wave 1 / quarry |
+| Market Upgrade | 4 levels | wave 2, Keep 3/4/6 |
+| Backpack | 6 levels: 8 → 66 | first sale … Keep 5 |
+| Blacksmith → Sword (10 tiers), Armor (8), Tools (5), Boots (5) | | wave 2, tiers gated by Keep level |
+| **Academy** | Research: Fletching, Masonry, Drill, Commerce, Alchemy, Logistics (5 levels each, +10% per level) | Keep 3 |
+| **Glory of Hearthold** | Repeatable: +2% damage and HP for everything, cost ×1.22 each level | Keep 5 |
+| **Merchant** (temporary) | Two random offers: Perk Scroll, Fury Elixir, Treasure Map, Tome of Wisdom, Ancient Relic | random visits |
 
-## 9. Hero
+Destroyed walls, towers, catapult and special towers leave rubble and a
+**Rebuild** pad at half price.
 
-- Moves at 6 u/s. HP 100. Regenerates 10 HP/s after 3 s without taking damage.
-- Auto-attacks the nearest enemy within 2 u every 0.55 s for 12 damage; nearby
-  enemies take 40% cleave damage.
-- Fighting takes priority over harvesting.
-- On death, the carried stack is lost and the hero respawns at the keep after 4 s.
-- The hero and soldiers can walk through friendly walls; enemies cannot.
+## 8. Hero
 
-## 10. Workers
+- Stats come from equipment × perks × relics × Glory (see `Stat` in `src/progress.ts`).
+- Auto-attacks with cleave; crits, lifesteal, dodge and thorns come from perks/relics.
+- **XP** from every kill (hero kills ×1.5), wave clears, chests and tomes.
+  Level curve `12·L^1.6 + 8`. Each level gives a **perk pick** (1 of 3, 20 perks with stack limits).
+- **Abilities** (unlock by level; cooldowns reset each wave):
+  Whirlwind (Lv 2), War Cry (Lv 5: +40% attack speed for towers, troops and hero),
+  Meteor (Lv 10: huge splash on the densest group), Bastion (Lv 16: repair 30%, heal troops).
+- **Relics**: after every boss wave (10, 20, …) choose 1 of 3 from 14 permanent relics.
+- Can be slowed (frost) and stunned (boss slams). Respawns at the keep after 4 s.
 
-- **Lumberjack** — finds the nearest grown tree, chops 4 logs, carries them to
-  the SELL pad, repeats.
-- **Miner** — same with rocks, preferring gold veins once the gold mine is open.
-- Workers spread out (one worker per node). Enemies ignore them.
-- Their deliveries go into the market like the hero's, so coins pile up on the
-  COINS pad while you're busy fighting.
+## 9. Enemies
 
-## 11. Defenders
+Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
 
-| Defender | Stats |
-|---|---|
-| Archer Tower | Range 12/13/14, damage 10/18/28, every 1.0/0.85/0.7 s; Lv3 fires at 2 targets. HP 300/500/800 |
-| Catapult | Range 4–18 (20 heavy), 45/80 splash damage (radius 3) every 3.2/2.6 s; aims at the densest group |
-| Keep | HP 600/1000/1600/2500. From Lv3 it shoots arrows (range 10, damage 12; Lv4 20 ×2 targets) |
-| Walls | HP Palisade 300 · Stone 700 · Fortified 1400 · Iron 2600. Fully repaired after each wave |
-| Soldiers | HP 90/120/150/190, damage 9/12/15/19. Guard posts behind the wall, engage enemies within 7.5 u, retrain 6 s after dying |
+| Act | Waves | New enemies | Boss (wave 10s) |
+|---|---|---|---|
+| I · The Raider Clans | 1–20 | Raider, Runner, Brute, Archer, Shieldbearer | Chieftain (10), Warlord (20) |
+| II · The Beast Tribes | 21–40 | Wolf, Berserker (enrages), Sapper (blows up walls), Shaman (heals), Battering Ram | Troll King (regen + slam), Great Mammoth (charges walls) |
+| III · The Restless Dead | 41–60 | Skeleton, Necromancer (summons), Giant Bat (flies), Wraith (passes through walls), Bone Golem | The Lich (summons, shields), Wraith Queen (phases, lifesteal) |
+| IV · The Frozen North | 61–80 | Ice Wolf, Frost Mage (slows, freezes towers), Frost Giant (throws boulders) | Frost Jarl (frost nova), Winter Witch |
+| V · The Dark Legion | 81–100 | Dark Knight (armor), Fire Drake (flying tower-hunter), Trebuchet (siege from range) | The Red Dragon (90), The Dread King (100) |
 
-Defenders with reach (hero, soldiers, archers) can hit enemies on the far side
-of a wall; enemy melee units can only hit the wall.
+- **Champions** (waves ending in 5): an act's toughest unit with 8× HP and a boss bar.
+- **Elites** (from wave 25): Armored, Swift, Regenerating, Shielded, Vampiric or
+  Explosive, shown with a coloured ring. More HP, more coins and XP.
+- **Wave modifiers** (announced one wave ahead): Blood Moon, Swarm, Forced
+  March, Golden Horde, Wide Front, Siege Train, Iron Horde, Champions' Muster.
+- **Armor** reduces each physical hit (melee, arrows, splash, ballista).
+  Magic, fire and holy damage ignore it. Ethereal enemies take half physical damage.
+- **Scaling**: HP `1 + 0.12(w−1) + 0.0045(w−20)²` after wave 20; damage, coins and
+  XP scale more gently. Act I keeps the original 20-wave numbers.
 
-## 12. Enemies and waves
+## 10. Between waves
 
-| Enemy | HP | Speed | Damage | Coins | First wave | Notes |
-|---|---|---|---|---|---|---|
-| Raider | 30 | 2.4 | 5 | 3 | 1 | Basic melee |
-| Runner | 20 | 4.2 | 4 | 3 | 4 | Fast |
-| Brute | 160 | 1.6 | 18 | 12 | 6 | 2× damage to walls, never looks for gaps |
-| Archer | 26 | 2.2 | 7 | 5 | 9 | Ranged (5.5 u), shoots over walls |
-| Shieldbearer | 100 | 2.0 | 10 | 8 | 12 | Takes 50% damage from arrows |
-| Chieftain (boss) | 900 | 1.9 | 35 | 80 | 10, 15 | 1.5× damage to walls |
-| Warlord (final boss) | 5000 | 1.7 | 60 | 300 | 20 | 2× damage to walls, summons 3 raiders every 10 s |
+- Countdown 90 s before wave 1, 45 s normally (50 s from wave 40), 60–65 s
+  before boss waves (+15 s with the Hourglass relic). **Call early** for bonus coins.
+- **Treasure chests** appear around the map (walk over them).
+- The **travelling merchant** visits every few waves.
+- **Gold Rush**: +50% sell value for that build phase.
 
-- Wave size: raiders `3 + 1.5w`, runners `0.9(w−3)` from wave 4, brutes
-  `(w−4)/2` from wave 6, archers `0.7(w−7)` from wave 9, shieldbearers
-  `0.8(w−10)` from wave 12. Bosses at waves 10, 15 (two) and 20.
-- Scaling per wave: HP ×(1 + 0.12(w−1)) (bosses ×(1 + 0.05(w−1))), damage
-  ×(1 + 0.06(w−1)), coins ×(1 + 0.05(w−1)).
-- Spawn spread across the north edge widens from ±7 to ±26 as waves go up.
-- Countdown before each wave: 90 s before wave 1 (frozen until the tutorial
-  reaches the build step), 60 s before boss waves, otherwise 45 s.
-- **Call early** button: start the wave now for bonus coins
-  (`remaining seconds × (0.6 + 0.12 × wave)`).
-- Wave clear bonus: `15 + 8w` coins. Loot left on the ground flies to the hero.
-- Targeting: enemies go for the hero or soldiers within 4.5 u, then towers or the
-  catapult within 6 u, otherwise the keep. A wall in the way gets attacked; most
-  enemies slide sideways to a nearby gap if one is within 3.5 u.
-- Endless mode (after victory): waves keep scaling; a Chieftain every 5 waves and
-  the Warlord every 10.
+## 11. Look and feel
 
-## 13. Win, lose, save
+- Daytime build phases; waves are fought at dusk with torches, lamps and lit
+  windows. Blood Moon turns the night red.
+- Each act changes the palette and weather: fireflies (I), autumn leaves and
+  amber trees (II), grey ash and fog (III), snow on every roof and field (IV),
+  embers under a crimson sky (V).
+- Wind-swept grass and trees, glowing magic, lightning, fire trails, shockwaves,
+  hit flashes, chill/burn tints and frozen towers.
+- HUD: coins, backpack, HP, level and XP, objective, buffs; wave card with act,
+  countdown/enemies left and the next wave's boss or modifier; keep HP; boss bar
+  (with shield); speed, pause and mute; ability bar.
 
-- **Victory**: clear wave 20 (the Warlord). The win screen shows stats and offers
-  **Keep playing (endless)** or **New game**.
-- **Defeat**: keep HP reaches 0. Slow-motion collapse, then a game-over screen
-  with **Retry wave N** (loads the checkpoint) or **New game**.
-- **Checkpoint**: saved at the start of every build phase. It stores coins, waves
-  cleared, every pad's stage, destroyed state and partial payment, flags,
-  tutorial step and stats. Loading replays each pad's purchases to rebuild the
-  village exactly.
-- The menu shows **Continue (wave N)** when a checkpoint exists.
+## 12. Win, lose, save
 
-## 14. Tutorial and guidance
+- **Victory**: clear wave 100 (the Dread King). Then endless mode or a new game.
+- **Defeat**: keep HP reaches 0 → retry from the checkpoint.
+- **Checkpoint** at the start of every build phase: coins, waves, every pad's
+  stage, hero level/XP/perks/relics, research and stats.
 
-A bouncing gold marker points at the current objective, and a ground arrow
-around the hero points toward it when it's off to the side.
+## 13. Debug and tuning
 
-1. Chop some wood in the forest (carry 5).
-2. Bring it to the market's SELL pad.
-3. Collect your coins from the COINS pad.
-4. Build a wall (center pads).
-5. Build an archer tower.
-6. Survive wave 1.
-
-After the tutorial, newly unlocked pads get a "New: …" toast and the marker
-points at them for a few seconds.
-
-## 15. HUD and screens
-
-- Top-left: coins, carried/capacity (flashes FULL), hero HP, objective text.
-- Top-center: wave card (countdown or enemies left, progress bar, Call-early
-  button), keep HP bar, boss HP bar during boss fights.
-- Top-right: pause and mute buttons.
-- World: floating name labels on nearby pads, HP bars on damaged units and
-  buildings, floating "+coins" and damage text, particles for chopping, hits and
-  builds.
-- Screens: title menu (Play / Continue / How to play), pause, game over, victory.
-- Camera zooms out on portrait phones so the playfield stays readable.
-
-## 16. Audio
-
-Synthesized effects: chop, mine, item pickup, drop, coin, pay tick, build fanfare,
-unlock ping, sword swing, hit, arrow, catapult boom, enemy death, hero hurt,
-wave horn, victory and defeat jingles. Mute state is remembered.
-
-## 17. Debug and tuning
-
-- All balance numbers live in `src/config.ts`; pad costs and unlocks live in
-  `src/pads.ts`.
-- `?debug` in the URL: `C` +500 coins, `N` start the next wave now, `K` kill all
-  enemies, `H` heal the keep, `G` toggle hero invincibility, `U` +1 wave cleared
-  (unlocks).
-  - `?debug&start` skips the menu.
-  - `?debug&preset=N` fast-forwards N waves with free coins. Add `&fight=S` to
-    start the next wave and run it for S seconds, or `&at=x,z` to place the hero.
-- `?autotest` runs a bot through all waves with free coins and writes a JSON
-  report into the page (smoke test for every building, enemy and save/load).
-  `?autotest&honest` makes the bot gather, sell and fight for its own coins, as a
-  balance check. With the current numbers the honest bot won 5 of 8 test runs.
-  Its losses come at waves 10–13 when it hasn't saved up for Keep Lv 3, because
-  the bot buys cheap upgrades greedily.
-  - `?debug&continue` loads the checkpoint without going through the menu.
-
-## 18. Out of scope (possible later)
-
-Background music, multiple maps, online leaderboards, more resource types
-(food, iron), hero abilities, day/night cycle, controller support.
+- `?debug`: `C` coins, `N` start wave, `K` kill all, `H` heal keep, `G` god mode,
+  `U` +1 wave cleared, `X` +500 XP. `?debug&start` skips the menu.
+  `?debug&preset=N` fast-forwards N waves with free coins (`&fight=S`, `&at=x,z`).
+- `?autotest` runs a bot through all 100 waves with free coins (smoke test of
+  every building, enemy, boss and save). `?autotest&honest` makes the bot earn
+  its own coins (balance check). `&waves=N` stops early. The report lists each
+  wave's lowest keep HP, defenses lost and any enemy that got stuck.
+- Balance at the time of writing: the generous bot clears all 100 waves. The
+  honest bot loses walls and towers from Act II on (60–120 defenses over a run);
+  in the last test batch it won 2 of 3 runs, and the loss came early in Act I.
