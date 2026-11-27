@@ -1,6 +1,6 @@
 import {
   CFG, ACTS, MODS, buildTime, callEarlyBonus, composition, eliteChance, rollMod, spawnInterval, spawnSpread, waveClearBonus,
-  AFFIXES, isBossWave, bossName, type SpawnSpec,
+  AFFIXES, AFFIX_FROM, isBossWave, bossName, type SpawnSpec,
 } from './config';
 import { G, actOf, addCoins } from './state';
 import { enemies, Units } from './units';
@@ -119,7 +119,8 @@ export const Waves = {
           const big = def.boss || spec.champion;
           const spread = big ? 4 : MODS[G.mod]?.wide ? 26 : spawnSpread(G.wave);
           const ec = eliteChance(G.wave) * (MODS[G.mod]?.elite ?? 1);
-          const affix = !big && Math.random() < ec ? AFFIX_IDS[Math.floor(Math.random() * AFFIX_IDS.length)] : null;
+          const ids = AFFIX_IDS.filter((a) => G.wave >= (AFFIX_FROM[a] ?? 0));
+          const affix = !big && Math.random() < ec ? ids[Math.floor(Math.random() * ids.length)] : null;
           Units.spawnEnemy(spec.type, (Math.random() * 2 - 1) * spread, CFG.map.spawnZ + Math.random() * 1.5, G.wave, { champion: spec.champion, affix });
         }
       } else if (!enemies.some((e) => e.alive)) {

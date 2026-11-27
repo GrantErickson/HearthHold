@@ -7,7 +7,7 @@ import { Input } from './input';
 import { pushOut } from './structures';
 import { World } from './world';
 import { enemies, type Enemy } from './units';
-import { Bar, burst, fly, text, slash, dust, spark, ring, puff } from './fx';
+import { Bar, burst, fly, text, slash, dust, spark, ring, puff, hitStop, shakeAt } from './fx';
 import { on } from './events';
 import { Sfx } from './audio';
 import { Stat } from './progress';
@@ -49,6 +49,8 @@ let swingStarted = false;
 let deadT = 0;
 let sinceHit = 99;
 let slashFlip = 1;
+/** Red screen-edge pulse after the hero takes damage (0–1). */
+export let heroHurt = 0;
 let targetFacing = 0;
 let fullShown = false;
 let spinT = 0;
@@ -78,6 +80,9 @@ function hurt(amount: number, kind: DamageKind, src?: unknown): void {
   sinceHit = 0;
   if (model) hitPulse(model);
   Sfx.play('hurt', 0.8);
+  // Big hits make the screen edges flash red.
+  heroHurt = Math.min(1, heroHurt + 0.25 + (amount / maxHp()) * 4);
+  if (amount > maxHp() * 0.12) G.shake = Math.min(0.6, G.shake + 0.15);
   const th = Stat.thorns();
   if (th > 0 && kind === 'melee' && src && typeof (src as Enemy).damage === 'function' && (src as Enemy).alive) {
     (src as Enemy).damage(amount * th, 'melee');
@@ -194,7 +199,19 @@ export function heroStrike(e: Enemy, mult: number, showText = true): number {
   let dmg = Stat.heroDmg() * mult;
   const crit = Math.random() < Stat.crit();
   if (crit) dmg *= 2;
+  const wasAlive = e.alive;
+  const warded = e.wardHits > 0;
   e.damage(dmg, 'melee', hero);
+  // A blow that only chips a ward shows the ward count instead of damage.
+  if (warded && e.wardHits > 0) showText = false;
+  // Knock them back; heavy blows send the fallen flying.
+  e.knock(hero.x, hero.z, crit ? 6 : mult > 1.5 ? 5 : 2.2);
+  if (crit) {
+    hitStop(0.05);
+    shakeAt(e.x, e.z, 0.08, 0.5);
+    Sfx.at('crit', e.x, e.z, 0.9);
+  }
+  if (wasAlive && !e.alive && (e.isBoss || e.scale >= 1.4)) hitStop(0.07);
   const leech = Stat.leech();
   if (leech > 0) hero.hp = Math.min(maxHp(), hero.hp + dmg * leech);
   if (showText) text(e.x, 1.9 * e.scale + 0.5 + e.flyH, e.z, String(Math.round(dmg)) + (crit ? '!' : ''), crit ? 'crit' : 'dmg', 0.7);
@@ -234,6 +251,7 @@ on('levelUp', () => {
 export function heroUpdate(dt: number): void {
   if (!model || !bar) return;
   const m = model;
+  if (heroHurt > 0) heroHurt = Math.max(0, heroHurt - dt * 1.6);
   if (hero.alive && hero.moving) {
     stepT -= dt;
     if (stepT <= 0) {

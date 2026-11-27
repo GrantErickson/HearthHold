@@ -21,6 +21,8 @@ uniform float uFar;
 uniform vec3 uInk;
 uniform float uStrength;
 uniform float uWidth;
+uniform vec4 uShock[3];
+uniform float uAspect;
 varying vec2 vUv;
 
 float linearDepth(vec2 uv) {
@@ -29,19 +31,41 @@ float linearDepth(vec2 uv) {
 }
 
 void main() {
-  vec4 col = texture2D(tDiffuse, vUv);
-  float d = linearDepth(vUv);
+  // Shockwaves: a ring that pushes the picture outward as it expands.
+  vec2 off = vec2(0.0);
+  float rs = 0.0;
+  for (int i = 0; i < 3; i++) {
+    vec4 s = uShock[i];
+    if (s.w <= 0.0) continue;
+    vec2 dv = vUv - s.xy;
+    dv.x *= uAspect;
+    float dist = length(dv);
+    float x = (dist - s.z) / 0.045;
+    float ring = exp(-x * x) * s.w;
+    vec2 dir = dist > 0.0001 ? dv / dist : vec2(0.0);
+    dir.x /= uAspect;
+    off += dir * ring * 0.022;
+    rs += ring;
+  }
+  vec2 uv = vUv - off;
+  vec4 col = texture2D(tDiffuse, uv);
+  if (rs > 0.002) {
+    col.r = texture2D(tDiffuse, uv - off * 0.45).r;
+    col.b = texture2D(tDiffuse, uv + off * 0.45).b;
+    col.rgb += min(rs, 1.0) * 0.06 * vec3(1.0, 0.92, 0.8);
+  }
+  float d = linearDepth(uv);
   vec2 o = uTexel * uWidth;
   // Only the nearer side of an edge draws ink, so lines hug the silhouette.
   float edge = 0.0;
-  edge = max(edge, linearDepth(vUv + vec2(o.x, 0.0)) - d);
-  edge = max(edge, linearDepth(vUv - vec2(o.x, 0.0)) - d);
-  edge = max(edge, linearDepth(vUv + vec2(0.0, o.y)) - d);
-  edge = max(edge, linearDepth(vUv - vec2(0.0, o.y)) - d);
-  edge = max(edge, linearDepth(vUv + o * 0.7) - d);
-  edge = max(edge, linearDepth(vUv - o * 0.7) - d);
-  edge = max(edge, linearDepth(vUv + vec2(o.x, -o.y) * 0.7) - d);
-  edge = max(edge, linearDepth(vUv + vec2(-o.x, o.y) * 0.7) - d);
+  edge = max(edge, linearDepth(uv + vec2(o.x, 0.0)) - d);
+  edge = max(edge, linearDepth(uv - vec2(o.x, 0.0)) - d);
+  edge = max(edge, linearDepth(uv + vec2(0.0, o.y)) - d);
+  edge = max(edge, linearDepth(uv - vec2(0.0, o.y)) - d);
+  edge = max(edge, linearDepth(uv + o * 0.7) - d);
+  edge = max(edge, linearDepth(uv - o * 0.7) - d);
+  edge = max(edge, linearDepth(uv + vec2(o.x, -o.y) * 0.7) - d);
+  edge = max(edge, linearDepth(uv + vec2(-o.x, o.y) * 0.7) - d);
   float rel = edge / max(d, 0.001);
   float ink = smoothstep(0.007, 0.02, rel);
   ink *= 1.0 - smoothstep(uFar * 0.32, uFar * 0.5, d);
@@ -71,6 +95,8 @@ class InkPass extends Pass {
     uInk: { value: new THREE.Color(0.12, 0.07, 0.1) },
     uStrength: { value: 0.92 },
     uWidth: { value: 1.4 },
+    uShock: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+    uAspect: { value: 1 },
   };
   private quad: FullScreenQuad;
 
@@ -90,6 +116,7 @@ class InkPass extends Pass {
 
   setSize(w: number, h: number): void {
     this.uniforms.uTexel.value.set(1 / w, 1 / h);
+    this.uniforms.uAspect.value = w / Math.max(1, h);
   }
 
   render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget): void {
@@ -105,6 +132,16 @@ class InkPass extends Pass {
     this.quad.dispose();
   }
 }
+
+interface Shock {
+  x: number;
+  y: number;
+  t: number;
+  life: number;
+  power: number;
+}
+const shocks: Shock[] = [];
+const _sv = new THREE.Vector3();
 
 let composer: EffectComposer | null = null;
 let bloom: UnrealBloomPass | null = null;
@@ -144,6 +181,34 @@ export const Post = {
     composer.setPixelRatio(pixelRatio);
     composer.setSize(w, h);
     if (ink) ink.uniforms.uWidth.value = Math.max(1.6, pixelRatio * 1.4);
+  },
+
+  /** A screen-space shockwave ripple from a world position (big explosions). */
+  shock(x: number, y: number, z: number, power: number): void {
+    if (!ink) return;
+    _sv.set(x, y, z).project(camera);
+    if (_sv.z > 1 || Math.abs(_sv.x) > 1.3 || Math.abs(_sv.y) > 1.3) return;
+    if (shocks.length >= 3) shocks.shift();
+    shocks.push({ x: _sv.x * 0.5 + 0.5, y: _sv.y * 0.5 + 0.5, t: 0, life: 0.55, power });
+  },
+
+  /** Advance the shockwaves (real time, so they also play during hit-stop). */
+  update(dt: number): void {
+    if (!ink) return;
+    for (let i = shocks.length - 1; i >= 0; i--) {
+      shocks[i].t += dt;
+      if (shocks[i].t >= shocks[i].life) shocks.splice(i, 1);
+    }
+    const u = ink.uniforms.uShock.value;
+    for (let i = 0; i < 3; i++) {
+      const s = shocks[i];
+      if (!s) {
+        u[i].set(0, 0, 0, 0);
+        continue;
+      }
+      const k = s.t / s.life;
+      u[i].set(s.x, s.y, 0.02 + (1 - (1 - k) ** 2) * 0.32 * (0.6 + s.power * 0.5), s.power * (1 - k) ** 1.5);
+    }
   },
 
   /** Brighter bloom at night so torches, magic and fire glow. */

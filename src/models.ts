@@ -346,6 +346,10 @@ interface HumanSpec {
   eyes?: number;
   orb?: number;
   barrel?: boolean;
+  /** Loot sack on the back (thieves). */
+  sack?: number;
+  /** Coiled rope and grappling hook (wall scalers). */
+  rope?: boolean;
   pauldrons?: number;
   weaponColor?: number;
 }
@@ -373,6 +377,8 @@ const SPECS: Partial<Record<HumanKind, HumanSpec>> = {
   golem: { body: BONE, legs: 0xc8c0aa, skin: 0xe0d8c4, helmet: 'bald', weapon: 'club', bones: true, eyes: 0x7dff8a, bulk: 1.35, weaponColor: 0xd8d0bc },
   frostmage: { body: 0x3a6aa8, legs: 0x2a3a5a, skin: 0xe0c8b0, helmet: 'hood', hood: 0x5a8ac8, weapon: 'staff', orb: 0x9fe8ff, robe: 0x3a6aa8, beard: 0xe8eef4 },
   giant: { body: 0x7a8a9a, legs: 0x4a5a6a, skin: 0xa8c0d0, helmet: 'bald', weapon: 'club', beard: 0xe8eef4, bulk: 1.2, belt: 0x5a4a3a, weaponColor: 0x9ac8e8 },
+  thief: { body: 0x4a3f36, legs: 0x2e2620, skin: 0x8ab84f, helmet: 'bandana', weapon: 'dagger', sack: 0xc8a46a, belt: 0x6b4a2a, eyes: 0xffe24a },
+  scaler: { body: 0x4a3a2c, legs: 0x2a2420, skin: 0xc98a5a, helmet: 'hood', hood: 0x2a2a30, weapon: 'dagger', cape: 0x3a2a22, rope: true, belt: 0x3a2a1a },
   knight: { body: 0x2a2a32, legs: 0x1a1a20, skin: 0x5a5a62, helmet: 'fullhelm', plume: 0x8a1c1c, weapon: 'greatsword', shield: 'tower', shieldColor: 0x3a1a1a, pauldrons: 0x3a3a44, eyes: 0xff3a2a },
   chieftain: { body: 0x4a1f1f, legs: 0x2a1a14, skin: 0xd9a066, helmet: 'crown', weapon: 'axe', beard: 0xd8d8d8, cape: 0x2a2a2a, pauldrons: 0x6a5a4a },
   warlord: { body: 0x2a2228, legs: 0x1a1418, skin: 0xb07a50, helmet: 'crown', weapon: 'hammer', beard: 0x1a1a1a, cape: 0x8a1c1c, pauldrons: 0x3a3a40 },
@@ -439,6 +445,21 @@ function torsoParts(sp: HumanSpec): Part[] {
       cyl(0.27, 0.27, 0.05, 8, 0x3a3a40, [0, 0.85, -0.42]),
       cyl(0.02, 0.02, 0.22, 6, 0x2a2a2a, [0.1, 1.38, -0.42]),
       glow(ball(0.07, 0xffb43a, [0.1, 1.5, -0.42]), 1),
+    );
+  }
+  if (sp.sack) {
+    p.push(
+      sph(0.3, 10, 8, sp.sack, [0, 1.12, -0.4], ZERO, [1, 1.1, 0.85]),
+      tor(0.09, 0.035, 0x8a6a3a, [0, 1.42, -0.4], [PI / 2, 0, 0], PI * 2),
+      glow(ball(0.06, 0xffd23f, [0.08, 1.5, -0.36]), 0.8),
+      glow(ball(0.05, 0xffd23f, [-0.06, 1.48, -0.42]), 0.8),
+    );
+  }
+  if (sp.rope) {
+    p.push(
+      tor(0.22, 0.05, 0xb89a6a, [0, 1.05, -0.33], [0, 0, 0.3], PI * 2),
+      cyl(0.025, 0.025, 0.5, 6, 0x5a5a62, [0.28, 1.25, -0.3], [0.2, 0, -0.4]),
+      tor(0.09, 0.025, 0x8a8a94, [0.36, 1.5, -0.3], [0, PI / 2, 0], PI * 1.2),
     );
   }
   const bone = 0xefe4c8;

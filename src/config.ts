@@ -58,6 +58,10 @@ export interface EnemyDef {
   charge?: boolean;
   /** Prefers towers over everything else. */
   hunter?: boolean;
+  /** Climbs over standing walls instead of battering them. */
+  climber?: boolean;
+  /** Ignores fighting: runs for the treasury, grabs coins and flees. */
+  thief?: boolean;
 }
 
 export interface ResDef {
@@ -185,6 +189,8 @@ export const CFG = {
     giant: E({ name: 'Frost Giant', hp: 700, speed: 1.3, dmg: 40, wallMul: 2, interval: 1.9, range: 0.8, coins: 40, xp: 20, cost: 15, r: 1.1, scale: 2.1, noGap: true, lob: { dmg: 60, range: 11, every: 5, splash: 2 } }),
     knight: E({ name: 'Dark Knight', hp: 220, speed: 2.0, dmg: 20, wallMul: 1.5, interval: 1.2, range: 0.6, coins: 16, xp: 10, cost: 6, r: 0.55, scale: 1.2, armor: 6 }),
     trebuchet: E({ name: 'Trebuchet', model: 'trebuchet', hp: 380, speed: 1.0, dmg: 0, interval: 4.5, range: 13, coins: 35, xp: 18, cost: 12, r: 1.2, scale: 1, siege: true, noGap: true, arrowResist: 0.5, slowImmune: true, lob: { dmg: 90, range: 13, every: 4.5, splash: 2.2 }, ranged: true }),
+    thief: E({ name: 'Goblin Thief', hp: 45, speed: 4.1, dmg: 0, interval: 1, range: 0.6, coins: 14, xp: 6, cost: 2.5, r: 0.4, scale: 0.85, climber: true, thief: true }),
+    scaler: E({ name: 'Wall Scaler', hp: 95, speed: 2.9, dmg: 14, interval: 1.0, range: 0.5, coins: 10, xp: 6, cost: 3, r: 0.45, scale: 1.05, climber: true, hunter: true }),
     drake: E({ name: 'Fire Drake', model: 'drake', hp: 120, speed: 3.0, dmg: 14, interval: 1.3, range: 4.5, coins: 14, xp: 9, cost: 5, r: 0.7, scale: 1.1, flying: true, breath: true, hunter: true }),
 
     chieftain: E({ name: 'Chieftain', hp: 900, speed: 1.9, dmg: 35, wallMul: 1.5, interval: 1.4, range: 0.8, coins: 80, xp: 60, cost: 0, r: 0.85, scale: 1.6, boss: true, noGap: true, enrage: true }),
@@ -221,11 +227,11 @@ export const ACTS: ActDef[] = [
   },
   {
     name: 'The Frozen North', sub: 'Winter comes, and the giants with it',
-    roster: [['wolf', 1, 61], ['berserker', 1, 61], ['shield', 0.8, 61], ['ram', 0.4, 61], ['skeleton', 1.5, 61], ['wraith', 0.8, 61], ['bat', 1, 61], ['golem', 0.4, 61], ['necro', 0.4, 61], ['archer', 1, 61], ['sapper', 0.6, 61], ['icewolf', 3, 61], ['frostmage', 1.2, 62], ['giant', 0.5, 64]],
+    roster: [['wolf', 1, 61], ['berserker', 1, 61], ['shield', 0.8, 61], ['ram', 0.4, 61], ['skeleton', 1.5, 61], ['wraith', 0.8, 61], ['bat', 1, 61], ['golem', 0.4, 61], ['necro', 0.4, 61], ['archer', 1, 61], ['sapper', 0.6, 61], ['icewolf', 3, 61], ['frostmage', 1.2, 62], ['giant', 0.5, 64], ['scaler', 1.1, 63], ['thief', 0.35, 66]],
   },
   {
     name: 'The Dark Legion', sub: 'The Dread King marches on Hearthold',
-    roster: [['knight', 2.5, 81], ['drake', 1, 82], ['trebuchet', 0.4, 84], ['icewolf', 1, 81], ['berserker', 1, 81], ['shield', 0.8, 81], ['giant', 0.4, 81], ['golem', 0.4, 81], ['wraith', 0.8, 81], ['necro', 0.4, 81], ['frostmage', 0.6, 81], ['skeleton', 1.5, 81], ['bat', 1, 81], ['sapper', 0.8, 81], ['archer', 1, 81], ['ram', 0.4, 81], ['shaman', 0.5, 81]],
+    roster: [['knight', 2.5, 81], ['drake', 1, 82], ['trebuchet', 0.4, 84], ['icewolf', 1, 81], ['berserker', 1, 81], ['shield', 0.8, 81], ['giant', 0.4, 81], ['golem', 0.4, 81], ['wraith', 0.8, 81], ['necro', 0.4, 81], ['frostmage', 0.6, 81], ['skeleton', 1.5, 81], ['bat', 1, 81], ['sapper', 0.8, 81], ['archer', 1, 81], ['ram', 0.4, 81], ['shaman', 0.5, 81], ['scaler', 1.4, 81], ['thief', 0.45, 81]],
   },
 ];
 
@@ -299,7 +305,10 @@ export const AFFIXES: Record<string, AffixDef> = {
   shielded: { name: 'Shielded', color: 0x7f9bff },
   vampiric: { name: 'Vampiric', color: 0xff4060 },
   explosive: { name: 'Explosive', color: 0xff9a2a },
+  warded: { name: 'Warded', color: 0xb98aff },
 };
+/** Affixes that need a later wave before they can roll. */
+export const AFFIX_FROM: Record<string, number> = { warded: 45 };
 export const eliteChance = (w: number): number => (w < 25 ? 0 : Math.min(0.3, 0.04 + (w - 25) * 0.0035));
 
 // ───────────────────────────── Progression ─────────────────────────────

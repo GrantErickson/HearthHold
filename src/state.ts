@@ -4,7 +4,7 @@ export type EnemyType =
   | 'wolf' | 'sapper' | 'shaman' | 'berserker' | 'ram'
   | 'skeleton' | 'necro' | 'wraith' | 'bat' | 'golem'
   | 'frostmage' | 'giant' | 'icewolf'
-  | 'knight' | 'trebuchet' | 'drake'
+  | 'knight' | 'trebuchet' | 'drake' | 'thief' | 'scaler'
   | 'chieftain' | 'warlord' | 'trollking' | 'mammoth' | 'lich'
   | 'wraithqueen' | 'jarl' | 'witch' | 'dragon' | 'dreadking';
 /** melee / arrow / splash / pierce are physical (armor applies); magic, fire and holy are not. */
@@ -89,7 +89,12 @@ export const G = {
   debug: false,
   god: false,
   autotest: false,
+  /** Camera trauma (0–1): decays every frame. */
   shake: 0,
+  /** Camera punch toward the action (0–1). */
+  kick: 0,
+  /** Real seconds of near-frozen time left (impact hit-stop). */
+  hitStop: 0,
 };
 
 export function addCoins(n: number): void {

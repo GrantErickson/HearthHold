@@ -8,7 +8,7 @@ import {
   ballistaHeadGeo, fireTowerGeo, flameGeo, spireGeo, spireOrbGeo, spireTop, spikesGeo, spikeBedGeo, tarGeo,
   cannonBaseGeo, cannonGunGeo, aerieGeo, aerieTop, roostGeo, ROOST_PERCH,
 } from './models';
-import { Bar, burst, fly, pop, text, lightning, beam, ring, fire, puff, spark } from './fx';
+import { Bar, burst, fly, pop, text, lightning, beam, ring, fire, puff, spark, shakeAt, scorch } from './fx';
 import { Sfx } from './audio';
 import { emit, on } from './events';
 import { enemies, soldiers, rangers, Units, applySlow, defenders, type Enemy } from './units';
@@ -506,8 +506,10 @@ function destroyStructure(s: Structure): void {
     puff(px, 0.6, s.z, 0xd8ccb8, { n: 6, spread: s.kind === 'wall' ? 1.1 : span * 0.7, size: 0.6, life: 1.1, up: 1.6, out: 2.2, grow: 0.7 });
   }
   for (let i = 0; i < 3; i++) spark(s.x + (Math.random() - 0.5) * span * 2, 1.5 + Math.random() * 2, s.z + (Math.random() - 0.5) * 2, 0xfff0c0, 1.1, 0.3);
-  G.shake = Math.min(0.7, G.shake + 0.25);
+  shakeAt(s.x, s.z, 0.3, 0.75);
   Sfx.at('crumble', s.x, s.z, 1.2);
+  scorch(s.x, s.z, s.kind === 'wall' ? 7 : Math.max(3, s.hw * 3), 0.35, 12);
+  if (s.kind === 'wall' && G.phase === 'wave') emit('threat', { kind: 'breach', x: s.x, z: s.z });
   if (s.kind === 'keep') {
     s.alive = false;
     emit('keepDestroyed');
@@ -850,8 +852,8 @@ function updateSpecial(t: Structure, dt: number): void {
       puff(mx, my, mz, 0xece6dc, { n: 5, spread: 0.3, size: 0.42, life: 0.9, up: 0.9, out: 1.6, grow: 0.7, delay: 0.04 });
       spark(mx, my, mz, 0xfff0b0, 1.3, 0.2);
       Proj.cannonball(mx, my, mz, tx, tz, C.dmg[L] * Stat.siegeDmg(), C.splash[L], flight);
-      G.shake = Math.min(0.35, G.shake + 0.06);
-      Sfx.at('boom', t.x, t.z, 0.9);
+      shakeAt(t.x, t.z, 0.06, 0.35);
+      Sfx.at('cannon', t.x, t.z, 0.9);
       return;
     }
     case 'frost': {

@@ -4,7 +4,8 @@ import { arrowGeo, boulderGeo, iceBoulderGeo, boltGeo, orbGeo, meteorGeo, cannon
 import type { Target } from './state';
 import { enemies, defenders, type Enemy } from './units';
 import { allStructures } from './structures';
-import { burst, flash, ring, puff, fire, boom, spark, dust } from './fx';
+import { burst, flash, ring, puff, fire, boom, spark, dust, warnCircle, shakeAt, streaks, scorch, hitStop, kick } from './fx';
+import { hero } from './hero';
 import { Sfx } from './audio';
 import { aimPoint } from './util';
 import { G } from './state';
@@ -126,6 +127,8 @@ export const Proj = {
     const m = take(key, () => makeMesh(ice ? iceBoulderGeo() : boulderGeo(), true, false));
     m.position.set(x, y, z);
     m.scale.setScalar(enemy ? 1.3 : 1);
+    // Incoming! Enemy boulders mark where they'll land.
+    if (enemy) warnCircle(tx, tz, splash, T, undefined, ice ? 0x6ac8ff : 0xff4a2a);
     lobs.push({ m, pool: key, fx: x, fy: y, fz: z, tx, ty: 0.3, tz, k: 0, T, dmg, splash, enemy, burn: 0, kind: ice ? 'ice' : 'boulder', trailT: 0, arc: 9 });
   },
 
@@ -275,18 +278,22 @@ export const Proj = {
       m.m.rotation.x += dt * 6;
       const mp = m.m.position;
       fire(mp.x, mp.y, mp.z, { n: 2, spread: 0.4, size: 0.55, life: 0.4, up: 0.5, out: 0.4 });
-      if (Math.random() < 0.5) puff(mp.x, mp.y + 0.3, mp.z, 0x4a3e38, { n: 1, spread: 0.3, size: 0.5, life: 0.8, up: 0.6, out: 0.2, grow: 0.6 });
+      if (Math.random() < 0.35) puff(mp.x, mp.y + 0.3, mp.z, 0x6a605a, { n: 1, spread: 0.3, size: 0.42, life: 0.6, up: 0.6, out: 0.2, grow: 0.5 });
       if (m.t >= 1) {
         for (const e of enemies) {
           if (e.alive && Math.hypot(e.x - m.tx, e.z - m.tz) < m.splash + e.r) {
-            e.damage(m.dmg, 'fire');
+            e.damage(m.dmg, 'fire', hero);
             e.burn(m.dmg * 0.05, 3);
+            e.knock(m.tx, m.tz, 10);
           }
         }
-        boom(m.tx, 0.3, m.tz, m.splash * 1.1, { chunks: 18 });
+        boom(m.tx, 0.3, m.tz, m.splash * 1.1, { chunks: 22, big: true });
         ring(m.tx, m.tz, 0xffd27a, m.splash * 1.9, 0.7);
-        G.shake = Math.min(0.9, G.shake + 0.5);
-        Sfx.at('explode', m.tx, m.tz, 1.2);
+        ring(m.tx, m.tz, 0xffffff, m.splash * 1.2, 0.3, 0.1);
+        scorch(m.tx, m.tz, m.splash * 2.8, 0.75, 14);
+        shakeAt(m.tx, m.tz, 0.6, 0.95);
+        hitStop(0.1);
+        Sfx.at('bigexplode', m.tx, m.tz, 1.2);
         give('met', m.m);
         meteors.splice(i, 1);
       }
@@ -303,6 +310,7 @@ function impact(b: Lob): void {
     }
     for (const u of defenders()) if (u.alive && Math.hypot(u.x - b.tx, u.z - b.tz) < b.splash + u.r) u.damage(b.dmg * 0.5, 'splash');
   } else {
+    const power = b.kind === 'cannon' ? 6 : b.kind === 'fire' ? 2.5 : 5;
     for (const e of enemies) {
       if (!e.alive) continue;
       if (b.kind !== 'fire' && e.flying) continue;
@@ -310,12 +318,13 @@ function impact(b: Lob): void {
       if (Math.hypot(e.x - b.tx, e.z - b.tz) < b.splash + e.r && dy < 2) {
         e.damage(b.dmg, b.kind === 'fire' ? 'fire' : 'splash');
         if (b.burn > 0) e.burn(b.burn, 3);
+        e.knock(b.tx, b.tz, power);
       }
     }
   }
   if (b.kind === 'cannon') {
     boom(b.tx, 0.3, b.tz, b.splash * 0.85);
-    G.shake = Math.min(0.5, G.shake + 0.12);
+    shakeAt(b.tx, b.tz, 0.12, 0.5);
     Sfx.at('explode', b.tx, b.tz, 0.7);
   } else if (b.kind === 'fire') {
     fire(b.tx, b.ty + 0.2, b.tz, { n: 7, spread: b.splash * 0.4, size: 0.4, life: 0.5, up: 2, out: 2 });
@@ -325,9 +334,15 @@ function impact(b: Lob): void {
   } else {
     const ice = b.kind === 'ice';
     dust(b.tx, b.tz, 1.2 + b.splash * 0.3, ice ? 0xd8f0fa : 0xc8b898);
-    burst(b.tx, 0.4, b.tz, ice ? 0xbfe8f8 : 0x8a7a6a, 12, { speed: 6, up: 5, size: 0.2, life: 0.7 });
-    spark(b.tx, 0.8, b.tz, ice ? 0xbff4ff : 0xfff0c0, 1.1, 0.25);
-    if (b.enemy) ring(b.tx, b.tz, ice ? 0x9fe8ff : 0xd8b080, b.splash * 1.2, 0.4);
-    Sfx.at('boom', b.tx, b.tz, 0.8);
+    burst(b.tx, 0.4, b.tz, ice ? 0xbfe8f8 : 0x8a7a6a, 14, { speed: 6, up: 6, size: 0.22, life: 0.8, trail: b.enemy ? 0.07 : 0 });
+    streaks(b.tx, 0.6, b.tz, ice ? 0xdff8ff : 0xfff0d0, 6, { speed: 8, up: 5, life: 0.3, size: 0.5 });
+    spark(b.tx, 0.8, b.tz, ice ? 0xbff4ff : 0xfff0c0, 1.2, 0.28);
+    scorch(b.tx, b.tz, b.splash * 1.6, ice ? 0.25 : 0.4, 7);
+    if (b.enemy) {
+      ring(b.tx, b.tz, ice ? 0x9fe8ff : 0xd8b080, b.splash * 1.3, 0.4);
+      shakeAt(b.tx, b.tz, 0.18, 0.6);
+      if (Math.hypot(hero.x - b.tx, hero.z - b.tz) < b.splash + 1) kick(0.3);
+    }
+    Sfx.at('boom', b.tx, b.tz, 0.9);
   }
 }

@@ -11,7 +11,9 @@ export type GameEvent =
   | 'statsChanged'
   | 'bossKilled'
   | 'actStart'
-  | 'happening';
+  | 'happening'
+  /** Something the hero should deal with: { kind, ... } (see threats.ts). */
+  | 'threat';
 
 type Handler = (arg?: unknown) => void;
 const handlers = new Map<GameEvent, Handler[]>();

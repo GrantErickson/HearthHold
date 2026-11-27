@@ -13,8 +13,15 @@ browser, in the carry-and-build style of mobile base-builder ads. No ads.
   fire and holy towers, spike and tar traps, catapult, soldiers and rangers —
   plus **cannon batteries** that out-range siege engines, a **griffin aerie**
   whose riders hunt enemies anywhere on the field, and a **dragon roost**.
-- **Cartoon look**: rounded models, cel shading, ink outlines, bloom, squash and
-  stretch, puffs of smoke and big cartoon explosions.
+- **Danger that needs a hero**: tunnelers burst up inside the walls, goblin
+  thieves raid your coins, scalers climb over, warded elites and bosses shrug
+  off towers until you strike them, and boss slams and boulders are telegraphed
+  so you can dodge. Off-screen arrows point at what needs you.
+- **Cartoon look and feel**: rounded models, cel shading, ink outlines, bloom,
+  squash and stretch, knock-back, hit-stop, big layered explosions with screen
+  shockwaves, scorch marks and enemies sent flying.
+- **Synthesized sound**: layered, positional effects with reverb, and war drums
+  that build as the danger grows.
 - **Many ways to level up**: hero XP with perk choices, four abilities, boss
   relics, equipment, Academy research, keep levels and repeatable Glory.
 - **Game speed** 1× to 3×, day/night, act seasons and weather.
@@ -51,10 +58,12 @@ push to `main` builds and deploys the site through GitHub Actions.
 
 - **Move:** WASD / arrow keys, or touch and drag anywhere (mouse drag works too).
 - Chopping, mining and fighting happen automatically when you're close enough.
+- **Step out of red circles**: they mark boss slams and incoming boulders.
 - **Abilities:** Q Whirlwind · E War Cry · R Meteor · F Bastion (or the buttons).
 - **Perks and relics:** L or click the level badge, then 1/2/3.
 - **Game speed:** `[` and `]` or the speed button. **Call wave early:** Space.
-- **Zoom:** mouse wheel. **Pause:** Esc / P · **Mute:** M
+- **Zoom:** mouse wheel. **Pause:** Esc / P · **Mute:** M (the pause menu also
+  toggles the war drums)
 
 ## Project layout
 
@@ -65,6 +74,7 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/progress.ts`                                | Derived stats (`Stat`), XP and levels, perk and relic choices             |
 | `src/abilities.ts`                               | Hero abilities                                                            |
 | `src/allies.ts`                                  | Griffin riders and the village dragon                                     |
+| `src/threats.ts`                                 | Tunnel ambushes, the danger level, alarms and off-screen threat arrows    |
 | `src/post.ts`                                    | Post-processing: ink outlines and bloom                                   |
 | `src/main.ts`                                    | Boot, game loop (sub-stepped for game speed), camera, keys                |
 | `src/hero.ts` / `src/units.ts`                   | Hero; enemies, soldiers, rangers and workers                              |
@@ -73,7 +83,8 @@ push to `main` builds and deploys the site through GitHub Actions.
 | `src/world.ts`                                   | Ground, grass, scenery, trees / rocks / gold / crystals                   |
 | `src/env.ts`                                     | Lighting, day/night, act palettes, seasons and weather                    |
 | `src/models.ts`                                  | Every 3D model, built from primitives in code, and the shared shaders     |
-| `src/fx.ts`                                      | Instanced particles (chunks, smoke and fire puffs, sparks), explosions, health bars, coin drops |
+| `src/fx.ts`                                      | Instanced particles, explosions, telegraph circles, hit-stop, shake, light flashes, health bars, coin drops |
+| `src/audio.ts`                                   | Synthesized sound effects and the procedural war drums                    |
 | `src/happenings.ts`                              | Treasure chests, the travelling merchant, gold rushes                     |
 | `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                    |
 | `src/ui.ts`, `src/style.css`, `index.html`       | HUD, ability bar, perk picker and menus                                   |
@@ -84,7 +95,9 @@ push to `main` builds and deploys the site through GitHub Actions.
 - `npm run typecheck` checks the types.
 - Open `/?autotest` (smoke test of all 100 waves with free coins) or
   `/?autotest&honest` (balance check). Either one writes a JSON report into the
-  page, including each wave's lowest keep HP and defenses lost.
+  page, including each wave's lowest keep HP, defenses lost, tunnels, coins
+  stolen, wards raised and hero deaths. Add `&passive` to keep the bot's hero
+  parked behind the wall instead of answering threats.
 - **Skip ahead to a later wave:** on the dev server, the main menu has a
   *Skip ahead* panel. Pick a wave (or an act / boss shortcut), a starting base
   and optional god mode. You can also link straight to it, e.g.

@@ -11,7 +11,7 @@ import { heroInit, heroUpdate, hero, maxHp } from './hero';
 import { Units } from './units';
 import { Proj } from './projectiles';
 import { Waves } from './waves';
-import { updateFX, updateTexts, burst, clearTexts, renderFX, warmFX, fxSampleMaterials } from './fx';
+import { updateFX, updateTexts, burst, clearTexts, renderFX, warmFX, fxSampleMaterials, boom, erupt, shatter, warnCircle } from './fx';
 import { Mat, ensureEmit } from './models';
 import { UI } from './ui';
 import { Save } from './save';
@@ -23,6 +23,8 @@ import { updateAbilities, resetAbilities, type AbilityId } from './abilities';
 import { initHappenings, updateHappenings } from './happenings';
 import { Post } from './post';
 import { updateAllies, alliesInfo } from './allies';
+import { updateThreats, renderThreats, Danger, tunnels } from './threats';
+import { cast } from './abilities';
 import { pendingChoices } from './progress';
 import { initDebugKeys, runAutotest, runPreset, jumpTo, refreshDevBar, JUMP_BASES, type JumpBase } from './debug';
 
@@ -37,6 +39,8 @@ let last = performance.now();
 let zoomWant = 1;
 let zoom = 1;
 let autoPickT = -1;
+let shakeTime = 0;
+const reducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /** Advance the simulation by one tick. */
 function step(dt: number): void {
@@ -49,6 +53,7 @@ function step(dt: number): void {
   Proj.update(dt);
   updatePads(dt);
   Waves.update(dt);
+  updateThreats(dt);
   updateAbilities(dt);
   updateHappenings(dt);
   updateFX(dt);
@@ -70,17 +75,27 @@ function updateCamera(dt: number): void {
   const k = 1 - Math.exp(-dt * 6);
   focus.x += (hero.x - focus.x) * k;
   focus.z += (hero.z - focus.z) * k;
+  // Smooth trauma shake (layered sines, not white noise) with a touch of roll.
+  shakeTime += dt;
   let sx = 0;
   let sz = 0;
+  let roll = 0;
   if (G.shake > 0) {
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0.3 : 1;
-    sx = (Math.random() - 0.5) * G.shake * reduce;
-    sz = (Math.random() - 0.5) * G.shake * reduce;
-    G.shake = Math.max(0, G.shake - dt * 1.6);
+    const a = G.shake * (reducedMotion ? 0.3 : 1);
+    const amp = a * a * 0.8 + a * 0.3;
+    const t = shakeTime * 26;
+    sx = (Math.sin(t + 0.3) * 0.5 + Math.sin(t * 2.31 + 1.7) * 0.3 + Math.sin(t * 3.97) * 0.2) * amp;
+    sz = (Math.sin(t * 1.13 + 2.1) * 0.5 + Math.sin(t * 2.07 + 0.4) * 0.3 + Math.sin(t * 4.41 + 3) * 0.2) * amp;
+    roll = Math.sin(t * 0.9 + 5) * a * a * 0.03;
+    G.shake = Math.max(0, G.shake - dt * 1.5);
   }
+  // Camera punch: dart toward the action and spring back.
+  const kk = reducedMotion ? 0 : G.kick * G.kick * 0.12;
+  G.kick = Math.max(0, G.kick - dt * 5);
   const lz = focus.z - 1.5;
-  camera.position.set(focus.x + sx, 24 * z, lz + 12 * z + sz);
-  camera.lookAt(focus.x + sx, 0, lz + sz);
+  camera.position.set(focus.x + sx, 24 * z * (1 - kk), lz + 12 * z * (1 - kk) + sz);
+  camera.lookAt(focus.x + sx * 0.5, 0, lz + sz * 0.5);
+  if (roll) camera.rotateZ(roll);
   Env.focus(focus.x, lz - 3);
 }
 
@@ -95,6 +110,11 @@ function frame(now: number): void {
   } else if (!G.paused) {
     // Sub-step so that 3× speed stays as stable as 1×.
     simDt = rdt * G.timeScale * (G.phase === 'gameover' ? 1 : G.speed);
+    // Hit-stop: a near-freeze for a few frames so big blows land.
+    if (G.hitStop > 0) {
+      simDt *= 0.05;
+      G.hitStop = Math.max(0, G.hitStop - rdt);
+    }
     const n = Math.max(1, Math.ceil(simDt / MAX_STEP));
     for (let i = 0; i < n; i++) step(simDt / n);
   } else simDt = 0;
@@ -107,7 +127,10 @@ function frame(now: number): void {
   renderFX();
   Sfx.listener.x = hero.x;
   Sfx.listener.z = hero.z;
+  Sfx.update(rdt, Danger.level, inGame() && !G.paused);
+  Post.update(rdt);
   updateTexts(rdt);
+  renderThreats();
   UI.update(rdt, objective);
   if (engine.renderer) Post.render(engine.renderer);
 }
@@ -194,7 +217,7 @@ function enableDebug(): void {
   debugOn = true;
   initDebugKeys();
   window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
-  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine, alliesInfo };
+  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, Waves, engine, alliesInfo, Proj, Sfx, Danger, tunnels, cast, fx: { boom, erupt, shatter, warnCircle } };
 }
 
 /** Test builds: start at a later wave with a base built from a typical run's income. */

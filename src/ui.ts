@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { scene } from './engine';
 import { G, actOf } from './state';
 import { CFG, ACTS, MODS, PERKS, RELICS, isBossWave, bossName } from './config';
-import { hero, capacity, maxHp, respawnIn } from './hero';
+import { hero, capacity, maxHp, respawnIn, heroHurt } from './hero';
+import { Danger } from './threats';
 import { S } from './structures';
 import { Units } from './units';
 import { Waves, type WaveClearInfo } from './waves';
@@ -242,7 +243,7 @@ export const UI = {
       'waveCard', 'waveAct', 'waveTitle', 'waveSub', 'waveMod', 'waveBar', 'callBtn', 'keepCard', 'keepBar', 'bossCard', 'bossName', 'bossBar', 'bossShield',
       'speedBtn', 'pauseBtn', 'muteBtn', 'abilities', 'banner', 'bannerTitle', 'bannerSub', 'toast', 'btnContinue', 'btnPlay', 'btnHow', 'how', 'btnResume',
       'btnRestart', 'btnMenu', 'btnMute2', 'heroSheet', 'overTitle', 'overStats', 'btnRetry', 'btnNew2', 'winStats', 'btnEndless', 'btnNew3', 'fatalMsg',
-      'chooseCrest', 'chooseTitle', 'chooseSub', 'chooseCards', 'btnLater', 'vignette',
+      'chooseCrest', 'chooseTitle', 'chooseSub', 'chooseCards', 'btnLater', 'vignette', 'btnMusic',
     ];
     els = {};
     for (const id of ids) els[id] = $(id);
@@ -269,6 +270,10 @@ export const UI = {
     click('btnRestart', h.retry);
     click('btnMenu', h.toMenu);
     click('btnMute2', h.toggleMute);
+    click('btnMusic', () => {
+      Sfx.setMusic(!Sfx.musicOn());
+      UI.refreshSound();
+    });
     click('btnRetry', h.retry);
     click('btnNew2', h.newGame);
     click('btnEndless', h.endless);
@@ -342,6 +347,7 @@ export const UI = {
     const m = Sfx.isMuted();
     setText(els.muteBtn, m ? '🔇' : '🔊');
     setText(els.btnMute2, m ? 'Sound: off' : 'Sound: on');
+    setText(els.btnMusic, Sfx.musicOn() ? 'War drums: on' : 'War drums: off');
   },
 
   refreshSpeed(): void {
@@ -511,7 +517,8 @@ export const UI = {
     const b = Units.boss();
     els.bossCard.hidden = !b;
     if (b) {
-      setText(els.bossName, b.title);
+      setText(els.bossName, b.wardHits > 0 ? `🔮${b.wardHits} ${b.title}` : b.vulnT > 0 ? `💥 ${b.title}` : b.title);
+      els.bossCard.classList.toggle('warded', b.wardHits > 0);
       setWidth(els.bossBar, b.hp / b.maxHp);
       setWidth(els.bossShield, b.shieldHp / b.shieldMax);
     }
@@ -537,7 +544,10 @@ export const UI = {
       e.btn.classList.toggle('ready', un && cd <= 0 && G.phase === 'wave' && !blocked(a));
     }
 
-    const danger = G.phase === 'wave' && kr < 0.35 ? 0.5 + Math.sin(G.time * 6) * 0.15 : 0;
+    // Red edges: the keep is failing, enemies are inside the walls, or the hero just took a beating.
+    const keepLow = G.phase === 'wave' && kr < 0.35 ? 0.5 + Math.sin(G.time * 6) * 0.15 : 0;
+    const inside = G.phase === 'wave' && Danger.inside > 0 ? Math.min(0.42, 0.14 + Danger.inside * 0.05) * (0.8 + 0.2 * Math.sin(G.time * 5)) : 0;
+    const danger = Math.max(keepLow, inside, heroHurt * 0.75);
     els.vignette.style.opacity = String(Math.max(Env.night * 0.55, danger).toFixed(2));
     els.vignette.classList.toggle('danger', danger > 0);
 

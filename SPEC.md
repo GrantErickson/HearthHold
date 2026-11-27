@@ -43,13 +43,24 @@ no accounts.** Progress is stored only in the player's browser.
   colours), snow on upward faces, self-lit glow (torches, crystals, runes, eyes)
   and windows that light up at night.
 - Particles and health bars are instanced (a handful of draw calls in total):
-  rounded debris chunks, cartoon smoke puffs (shaded balls that pop in and shrink
-  away), white-hot fire puffs, additive glows and star-shaped impact sparks.
+  rounded debris chunks (big blasts make them trail smoke), cartoon smoke puffs
+  (shaded balls that pop in and shrink away), white-hot fire puffs, additive
+  glows, star-shaped impact sparks, velocity-stretched spark streaks, fresnel
+  blast shells and ground scorch marks.
+- Explosions also flash a real point light (a fixed pool of three, so the shader
+  never recompiles) and the big ones send a screen-space shockwave ripple through
+  the post pass. Big blows freeze the action for a few frames (hit-stop), shake
+  the camera (smooth trauma shake with a little roll) and punch it inward.
   Every material variant is compiled at boot to avoid mid-battle hitches.
 - Each character has its own material instance (same shader), so hits and
   status effects tint smoothly instead of swapping whole-model colours.
-- Sound effects are synthesized with the Web Audio API (no audio files). No
-  sound is scheduled until a user gesture has started the audio context.
+- Sound is synthesized with the Web Audio API (no audio files): layered
+  effects (transient, body, sub thump, tail) with pitch variation, stereo pan
+  and distance muffling, a shared reverb, a limiter and a voice cap. **War
+  drums** play during waves and build with the danger level (taiko, toms, a low
+  drone, a string ostinato when it's dire); the keep's heartbeat sounds when it
+  is low. No sound is scheduled until a user gesture has started the audio
+  context. Pause menu: Sound on/off, War drums on/off.
 - Save data: `localStorage` key `hearthold-save-v2` (v1 saves from the 20-wave
   version are ignored). Every read/write is wrapped.
 
@@ -174,13 +185,42 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
 
 - **Champions** (waves ending in 5): an act's toughest unit with 8× HP and a boss bar.
 - **Elites** (from wave 25): Armored, Swift, Regenerating, Shielded, Vampiric or
-  Explosive, shown with a coloured ring. More HP, more coins and XP.
+  Explosive, shown with a coloured ring. More HP, more coins and XP. From wave 45
+  also **Warded**: a rune bubble that towers and troops can't hurt until the hero
+  strikes it.
+- **Goblin Thief** (in tunnel parties from wave 30, climbs walls from wave 66):
+  ignores fights, runs for the market, grabs coins (the uncollected pile first,
+  then up to 15% of your purse) and flees north. Kill it to get the coins back.
+- **Wall Scaler** (waves 63+): throws a grappling hook and climbs over standing
+  walls, then hunts towers from behind.
+- **Boss wards** (from wave 40): bosses raise a ward at half HP (at two thirds and
+  one third from wave 70); champions from wave 45 at half HP. While it holds,
+  only the hero's blows count (3 to 6 hits). Breaking it stuns a boss for 2.5 s
+  and it takes +50% damage for 6 s. Flying bosses out of reach never ward.
 - **Wave modifiers** (announced one wave ahead): Blood Moon, Swarm, Forced
   March, Golden Horde, Wide Front, Siege Train, Iron Horde, Champions' Muster.
 - **Armor** reduces each physical hit (melee, arrows, splash, ballista).
   Magic, fire and holy damage ignore it. Ethereal enemies take half physical damage.
 - **Scaling**: HP `1 + 0.12(w−1) + 0.0045(w−20)²` after wave 20; damage, coins and
   XP scale more gently. Act I keeps the original 20-wave numbers.
+
+### Danger and the hero's job
+
+From Act II the walls alone aren't enough:
+
+- **Tunnel ambushes** (wave 25+: sometimes; 45+: one or two a wave; 70+: two or
+  three): the ground rumbles inside the walls, a pulsing circle marks the spot
+  for 3.4 s, then a party bursts out (wolves and a berserker; skeletons and a
+  necromancer in Act III; ice wolves and a frost mage; then berserker, knight,
+  sappers and scalers), plus thieves from wave 30.
+- **Telegraphs**: boss slams wind up for about a second over a filling red
+  circle (step out!), and enemy boulders mark where they'll land.
+- **Alarms**: a bell when a wall falls or enemies get inside; off-screen arrows
+  at the screen edge point at tunnels, thieves, warded enemies, bosses and
+  intruders; the screen edges glow red while enemies are inside, the keep is
+  low, or the hero just took a heavy hit.
+- **Feel**: big enemies' footsteps thud and shake the ground; hits knock enemies
+  back and heavy blows (crits, whirlwind, explosions) send the fallen flying.
 
 ## 10. Between waves
 
@@ -198,13 +238,18 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
   amber trees (II), grey ash and fog (III), snow on every roof and field (IV),
   embers under a crimson sky (V).
 - Cartoon look: rounded models, cel shading, ink outlines, bloom on magic and fire.
-- Hits squash the target and pop a star; deaths squash, spring and vanish in a
-  puff of smoke; explosions are white-hot fireballs, rolling smoke, chunks and a
-  shockwave; buildings shudder when struck and collapse in a dust cloud; the
-  hero's sword leaves swooshes. Chill, burn and holy show as gentle tints.
+- Hits squash the target, knock it back, pop a star and spray spark streaks away
+  from the blow; crits freeze the frame for a beat. Deaths squash, spring and
+  vanish in a puff of smoke, or tumble through the air when an explosion or a
+  heavy blow kills them. Explosions: a white-hot flash and blast shell, rolling
+  fireballs that rise into a smoke column, spark streaks, falling embers,
+  smoking debris, a dust skirt, a shockwave ring, a light flash, a scorch mark
+  and (for the big ones) a screen ripple. Buildings shudder when struck and
+  collapse in a dust cloud; the hero's sword leaves swooshes. Chill, burn and
+  holy show as gentle tints.
 - HUD: coins, backpack, HP, level and XP, objective, buffs; wave card with act,
   countdown/enemies left and the next wave's boss or modifier; keep HP; boss bar
-  (with shield); speed, pause and mute; ability bar.
+  (with shield and ward); speed, pause and mute; ability bar; threat arrows.
 
 ## 12. Win, lose, save
 
@@ -228,8 +273,15 @@ Five acts, each with its own roster (weights in `ACTS` in `src/config.ts`):
   and free coins, so the base shows real wear (`&fight=S`, `&at=x,z`).
 - `?autotest` runs a bot through all 100 waves with free coins (smoke test of
   every building, enemy, boss and save). `?autotest&honest` makes the bot earn
-  its own coins (balance check). `&waves=N` stops early. The report lists each
-  wave's lowest keep HP, defenses lost and any enemy that got stuck.
+  its own coins (balance check). `&waves=N` stops early. The bot's hero walks at
+  its real speed and answers threats the way a player would (wards first, then
+  thieves, intruders and tunnels about to open); `&passive` keeps it parked
+  behind the centre of the wall instead. The report lists each wave's lowest
+  keep HP, defenses lost, tunnels, coins stolen and escaped, wards and hero
+  deaths, plus any enemy that got stuck.
 - Balance at the time of writing: the generous bot clears all 100 waves. The
-  honest bot loses walls and towers from Act II on (60–120 defenses over a run);
-  in the last test batch it won 2 of 3 runs, and the loss came early in Act I.
+  honest bot that answers threats won its run (34 defenses lost, about 12k coins
+  stolen of 1.6M earned, waves of 55 to 85 s, about three minutes for the Dread
+  King). Parked behind the wall, two runs lost 56 and 86 defenses, had 51k and
+  109k coins stolen, dragged on for 150 to 500 s while warded enemies roamed, and
+  one of them fell at wave 100. The honest bot can still lose early in Act I.

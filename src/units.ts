@@ -4,11 +4,11 @@ import {
   CFG, AFFIXES, MODS, hpScale, bossScale, dmgScale, coinScale, xpScale, marchScale, type EnemyDef,
 } from './config';
 import { G, type DamageKind, type EnemyType, type ResType, type Target } from './state';
-import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, type UnitModel } from './models';
+import { unitModel, setModelMat, hitPulse, updateLook, itemGeo, ITEM_H, makeMesh, Mat, U, type UnitModel } from './models';
 import * as St from './structures';
 import { hero, heroSlow, heroStun } from './hero';
 import { World, type ResNode } from './world';
-import { Bar, burst, dropCoins, text, ring, beam, boom, poof, impact } from './fx';
+import { Bar, burst, dropCoins, text, ring, beam, boom, poof, impact, dust, spark, shatter, warnCircle, hitStop, shakeAt, kick, scorch } from './fx';
 import { Sfx } from './audio';
 import { Proj } from './projectiles';
 import { Stat, gainXp } from './progress';
@@ -77,6 +77,48 @@ function ringMat(c: number): THREE.MeshBasicMaterial {
     ringMats.set(c, m);
   }
   return m;
+}
+
+/** Magic ward bubble: only the hero's blows can break it. */
+const wardGeo = new THREE.IcosahedronGeometry(1, 2);
+const WARD_COLOR = 0xb98aff;
+const wardMat = new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color(WARD_COLOR) }, uTime: U.uTime },
+  vertexShader: /* glsl */ `
+    varying vec3 vN;
+    varying vec3 vV;
+    varying vec3 vP;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vN = normalize(mat3(modelMatrix) * normal);
+      vV = normalize(cameraPosition - wp.xyz);
+      vP = position;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform vec3 uColor;
+    uniform float uTime;
+    varying vec3 vN;
+    varying vec3 vV;
+    varying vec3 vP;
+    void main() {
+      float f = 1.0 - abs(dot(normalize(vN), normalize(vV)));
+      f = pow(f, 1.8);
+      float band = smoothstep(0.86, 1.0, fract(vP.y * 3.0 - uTime * 0.8)) * 0.6;
+      gl_FragColor = vec4(uColor * (0.1 + f * 1.4 + band * (0.3 + f)), 1.0);
+    }`,
+  transparent: true,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+export const wardMaterial = (): THREE.Material => wardMat;
+
+/** Seconds a climber needs to get over a wall. */
+const CLIMB_TIME = { scaler: 1.5, thief: 1.0 } as Record<string, number>;
+
+/** A fixed point that units can walk to (thieves' treasury and escape). */
+function point(x: number, z: number): Target {
+  return { x, z, r: 0, hw: 0, hd: 0, alive: true, isStruct: false, damage: () => undefined };
 }
 
 // ───────────────────────────── Enemies ─────────────────────────────
@@ -148,6 +190,34 @@ export class Enemy implements Target {
   m: UnitModel;
   bar: Bar;
   aura: THREE.Mesh | null = null;
+  /** Knock-back velocity. */
+  kx = 0;
+  kz = 0;
+  /** Blown into the air by the blow that killed it. */
+  launch: { vx: number; vy: number; vz: number; y: number; spin: number } | null = null;
+  /** Wall climbing (seconds left, total, from/to z, height). */
+  climbT = 0;
+  climbDur = 1;
+  climbZ0 = 0;
+  climbZ1 = 0;
+  climbH = 3;
+  /** Rising out of a tunnel. */
+  emergeT = 0;
+  /** Thieves: coins carried, and whether they're running for it. */
+  loot = 0;
+  fleeing = false;
+  goal: Target | null = null;
+  /** Hero hits needed to break the ward (0 = no ward). */
+  wardHits = 0;
+  wardMax = 0;
+  wardPhase = 0;
+  wardPhases: number[] = [];
+  ward: THREE.Mesh | null = null;
+  /** Takes extra damage after its ward was shattered. */
+  vulnT = 0;
+  /** Boss slam wind-up. */
+  slamWind = 0;
+  stepT = 0;
 
   constructor(type: EnemyType, x: number, z: number, wave: number, o: SpawnOpts = {}) {
     this.type = type;
@@ -205,6 +275,13 @@ export class Enemy implements Target {
       this.aura.renderOrder = 7;
       this.m.group.add(this.aura);
     }
+    if (this.affix === 'warded') this.raiseWard(1, false);
+    // From Act III on, bosses and champions the hero can reach raise wards as they weaken.
+    if (this.flyH <= 4 && !d.siege) {
+      if (d.boss && wave >= 40) this.wardPhases = wave >= 70 ? [0.66, 0.33] : [0.5];
+      else if (champ && wave >= 45) this.wardPhases = [0.5];
+    }
+    if (d.thief) this.goal = point(0, 0);
   }
 
   get isBoss(): boolean {
@@ -217,8 +294,87 @@ export class Enemy implements Target {
     return this.d.name;
   }
 
+  /** Throw up a ward that only the hero can break. */
+  raiseWard(hits: number, announce = true): void {
+    this.wardHits = this.wardMax = hits;
+    if (!G.autotest) {
+      if (!this.ward) {
+        this.ward = new THREE.Mesh(wardGeo, wardMat);
+        this.ward.renderOrder = 18;
+        this.m.group.add(this.ward);
+      }
+      const big = this.isBoss ? 1.25 : 1;
+      this.ward.scale.set(0.95 * big, 1.25 * big, 0.95 * big);
+      this.ward.position.y = 1.05 + (this.d.model === 'mammoth' ? 1.4 : 0);
+      this.ward.visible = true;
+    }
+    if (announce) {
+      ring(this.x, this.z, WARD_COLOR, 4 * Math.min(2, this.scale), 0.7);
+      burst(this.x, 1.6 * this.scale, this.z, WARD_COLOR, 20, { glow: true, speed: 4, up: 4 });
+      text(this.x, 3.4 * Math.min(2, this.scale), this.z, 'Warded! Strike it yourself!', 'xp big', 1.8);
+      Sfx.at('magic', this.x, this.z, 1);
+      Sfx.play('warn', 0.8);
+      emit('threat', { kind: 'ward', e: this });
+    }
+  }
+
+  private breakWard(): void {
+    this.wardHits = 0;
+    if (this.ward) this.ward.visible = false;
+    const y = 1.2 * Math.min(2.4, this.scale) + this.flyH;
+    shatter(this.x, y, this.z, Math.min(2.4, this.scale), 0xc8a8ff);
+    Sfx.at('shatter', this.x, this.z, 1);
+    hitStop(this.isBoss ? 0.14 : 0.06);
+    shakeAt(this.x, this.z, this.isBoss ? 0.45 : 0.15);
+    if (this.isBoss) {
+      kick(0.6);
+      this.stunT = Math.max(this.stunT, 2.5);
+      this.vulnT = 6;
+      this.slamWind = 0;
+      text(this.x, 3.6 * Math.min(2, this.scale), this.z, 'Ward shattered! Weak point exposed!', 'gold big', 1.8);
+    } else text(this.x, 2.6 * this.scale, this.z, 'Shattered!', 'gold', 1);
+  }
+
+  /** Shoved away from a blow. Dead small enemies get launched into the air instead. */
+  knock(fx: number, fz: number, power: number): void {
+    if (this.d.siege || this.climbT > 0 || this.emergeT > 0 || power <= 0) return;
+    let dx = this.x - fx;
+    let dz = this.z - fz;
+    const L = Math.hypot(dx, dz);
+    if (L < 0.01) {
+      const a = Math.random() * Math.PI * 2;
+      dx = Math.cos(a);
+      dz = Math.sin(a);
+    } else {
+      dx /= L;
+      dz /= L;
+    }
+    if (!this.alive) {
+      if (this.exploded || this.isBoss || this.launch || this.flying || this.deathT > 0.05 || power < 4 || this.scale > 1.6) return;
+      const out = 2 + power * 0.45;
+      this.launch = { vx: dx * out, vy: 6.5 + power * 0.35 + Math.random() * 2.5, vz: dz * out, y: 0, spin: (Math.random() - 0.5) * 16 };
+      if (Math.random() < 0.4) Sfx.at('launch', this.x, this.z, 0.7);
+      return;
+    }
+    let k = power;
+    if (this.isBoss) k *= 0.1;
+    else if (this.scale > 1.6 || this.d.model === 'mammoth') k *= 0.3;
+    else if (this.flying) k *= 0.6;
+    this.kx += dx * k;
+    this.kz += dz * k;
+  }
+
   /** Raw HP loss without hit flash (burning, shields). */
   private lose(amount: number): void {
+    if (this.wardHits > 0) return;
+    const phase = this.wardPhases[this.wardPhase];
+    if (phase !== undefined && (this.hp - amount) / this.maxHp < phase) {
+      // Never skip past a ward phase, however hard the hit.
+      this.hp = this.maxHp * phase;
+      this.wardPhase++;
+      this.raiseWard(this.d.boss ? 3 + Math.floor(this.wave / 30) : 2);
+      return;
+    }
     if (this.shieldHp > 0) {
       const a = Math.min(this.shieldHp, amount);
       this.shieldHp -= a;
@@ -246,13 +402,36 @@ export class Enemy implements Target {
     if (d.undead && kind === 'holy') amount *= 2;
     if (this.armor > 0 && PHYSICAL.has(kind)) amount = Math.max(amount * 0.25, amount - this.armor);
     if (src === hero) this.heroHit = true;
-    // A squash and a soft glow; big enemies that are hit constantly react less.
     const big = this.isBoss || this.scale > 1.6;
+    if (this.wardHits > 0) {
+      const y = 1.2 * Math.min(2.4, this.scale) + this.flyH;
+      if (src !== hero) {
+        // Towers and troops just bounce off.
+        if (this.flashCd <= 0) {
+          this.flashCd = 0.18;
+          spark(this.x + (Math.random() - 0.5) * 0.8, y + (Math.random() - 0.5) * 0.6, this.z + 0.5, 0xd8c0ff, 0.7, 0.2);
+          Sfx.at('ward', this.x, this.z, 0.5);
+        }
+        return;
+      }
+      this.wardHits--;
+      if (this.wardHits > 0) {
+        hitPulse(this.m, big ? 0.3 : 1);
+        impact(this.x, y, this.z + 0.4, 0xd8c0ff, true, this.x - hero.x, this.z - hero.z);
+        text(this.x, y + 1.4, this.z, `Ward ${this.wardHits}`, 'xp', 0.6);
+        Sfx.at('clang', this.x, this.z, 0.9);
+        return;
+      }
+      this.breakWard();
+    }
+    if (this.vulnT > 0) amount *= 1.5;
+    // A squash and a soft glow; big enemies that are hit constantly react less.
     hitPulse(this.m, big ? 0.22 : 1);
     if (this.flashCd <= 0) {
       this.flashCd = big ? 0.3 : 0.12;
       const c = HIT_COLOR[kind];
-      if (c) impact(this.x + (Math.random() - 0.5) * 0.4 * this.scale, (this.aimY ?? 1.1) + (Math.random() - 0.3) * 0.4 * this.scale, this.z + 0.3, c, kind === 'melee' || kind === 'pierce');
+      const fromHero = src === hero;
+      if (c) impact(this.x + (Math.random() - 0.5) * 0.4 * this.scale, (this.aimY ?? 1.1) + (Math.random() - 0.3) * 0.4 * this.scale, this.z + 0.3, c, kind === 'melee' || kind === 'pierce', fromHero ? this.x - hero.x : undefined, fromHero ? this.z - hero.z : undefined);
     }
     this.lose(amount);
   }
@@ -270,8 +449,15 @@ export class Enemy implements Target {
     this.bar.hide();
     setModelMat(this.m, null);
     if (this.aura) this.aura.visible = false;
+    if (this.ward) this.ward.visible = false;
     if (this.exploded) return;
     G.stats.kills++;
+    if (this.loot > 0) {
+      dropCoins(this.x, this.z, this.loot);
+      text(this.x, 2.6, this.z, `Recovered ${Math.round(this.loot)}!`, 'gold', 1.4);
+      emit('threat', { kind: 'recovered', amount: this.loot });
+      this.loot = 0;
+    }
     dropCoins(this.x, this.z, this.coins * Stat.killCoinMul() + Stat.killCoinFlat());
     gainXp(this.xp * (this.heroHit ? 1.5 : 1));
     if (this.d.undead) burst(this.x, 1 + this.flyH, this.z, 0x9affc8, 8, { speed: 2, up: 3, glow: true });
@@ -279,7 +465,9 @@ export class Enemy implements Target {
     if (this.d.bomb) explode(this.x, this.z, this.d.bomb.radius, this.dmg + this.d.bomb.dmg * dmgScale(this.wave) * 0.6, 'enemies');
     if (this.affix === 'explosive') explode(this.x, this.z, 2.6, 30 * dmgScale(this.wave), 'defenders');
     if (this.isBoss) {
-      G.shake = 0.6;
+      G.shake = Math.max(G.shake, 0.6);
+      hitStop(0.2);
+      kick(0.7);
       text(this.x, 3.5 + this.flyH, this.z, `${this.title} defeated!`, 'gold big', 2);
       burst(this.x, 1.5 + this.flyH, this.z, 0xffd54a, 30, { glow: true, speed: 7, up: 6, life: 1 });
       ring(this.x, this.z, 0xffd54a, 7, 0.8);
@@ -293,6 +481,17 @@ export class Enemy implements Target {
   /** Units that enemies can fight. */
   private pickTarget(): void {
     const d = this.d;
+    if (d.thief && this.goal) {
+      if (this.fleeing) {
+        this.goal.x = clamp(this.goal.x, MAP.minX + 2, MAP.maxX - 2);
+        this.goal.z = MAP.spawnZ - 3;
+      } else {
+        this.goal.x = St.market.coin.x;
+        this.goal.z = St.market.coin.z;
+      }
+      this.target = this.goal;
+      return;
+    }
     if (d.siege) {
       this.target = this.siegeTarget();
       return;
@@ -378,13 +577,12 @@ export class Enemy implements Target {
       }
     }
     if (d.slam) {
-      this.slamT -= dt;
-      if (this.slamT <= 0) {
-        const s = d.slam;
-        const near = defenders().some((u) => u.alive && Math.hypot(u.x - this.x, u.z - this.z) < s.radius);
-        if (near) {
-          this.slamT = s.every;
-          this.swingT = 0;
+      const s = d.slam;
+      if (this.slamWind > 0) {
+        // Telegraphed: the red circle fills, then the ground shakes. Get out!
+        this.slamWind -= dt;
+        if (this.slamWind <= 0) {
+          this.swingT = 0.35;
           const dmg = s.dmg * dmgScale(this.wave);
           for (const u of defenders()) {
             if (!u.alive || Math.hypot(u.x - this.x, u.z - this.z) > s.radius) continue;
@@ -393,10 +591,27 @@ export class Enemy implements Target {
             else (u as Soldier).stunT = s.stun;
           }
           ring(this.x, this.z, 0xd8b080, s.radius, 0.6);
-          burst(this.x, 0.3, this.z, 0x9a8a7a, 20, { speed: 7, up: 3, size: 0.25 });
-          G.shake = Math.min(0.8, G.shake + 0.4);
-          Sfx.at('boom', this.x, this.z, 1);
-        } else this.slamT = 0.5;
+          ring(this.x, this.z, 0xfff0d0, s.radius * 0.7, 0.35, 0.1);
+          boom(this.x, 0.1, this.z, s.radius * 0.45, { dirt: true, smoke: 0xb8a888, chunks: 16 });
+          scorch(this.x, this.z, s.radius * 1.4, 0.5, 6);
+          shakeAt(this.x, this.z, 0.5, 0.9);
+          if (Math.hypot(hero.x - this.x, hero.z - this.z) < s.radius * 2.5) {
+            hitStop(0.09);
+            kick(0.5);
+          }
+          Sfx.at('slam', this.x, this.z, 1);
+        }
+      } else {
+        this.slamT -= dt;
+        if (this.slamT <= 0) {
+          const near = defenders().some((u) => u.alive && Math.hypot(u.x - this.x, u.z - this.z) < s.radius);
+          if (near) {
+            this.slamT = s.every;
+            this.slamWind = 0.95;
+            warnCircle(this.x, this.z, s.radius, 0.95, this);
+            Sfx.at('warn', this.x, this.z, 1);
+          } else this.slamT = 0.5;
+        }
       }
     }
     if (d.nova) {
@@ -451,6 +666,24 @@ export class Enemy implements Target {
         return;
       }
       const g = this.m.group;
+      if (this.launch) {
+        // Sent flying by an explosion: tumble through the air, poof on landing.
+        const L = this.launch;
+        L.vy -= 24 * dt;
+        this.x += L.vx * dt;
+        this.z += L.vz * dt;
+        L.y += L.vy * dt;
+        g.position.set(this.x, Math.max(0, L.y), this.z);
+        g.rotation.x += L.spin * dt;
+        g.rotation.z += L.spin * 0.6 * dt;
+        if ((L.y <= 0 && L.vy < 0) || this.deathT > 2.5) {
+          poof(this.x, 0.5, this.z, this.scale, this.d.undead ? 0xd8f0e8 : 0xf2ece4);
+          dust(this.x, this.z, 0.8 * this.scale);
+          g.visible = false;
+          this.removed = true;
+        }
+        return;
+      }
       if (this.isBoss) {
         // Bosses topple, then go up in a big cartoon blast.
         if (this.flying) {
@@ -500,7 +733,32 @@ export class Enemy implements Target {
     }
     if (this.slowT > 0) this.slowT -= dt;
     if (this.flashCd > 0) this.flashCd -= dt;
-    updateLook(this.m, dt, this.stunT > 0 || this.slowT > 0 ? 'chill' : this.burnT > 0 ? 'burn' : null, G.time);
+    if (this.vulnT > 0) this.vulnT -= dt;
+    updateLook(this.m, dt, this.stunT > 0 || this.slowT > 0 ? 'chill' : this.burnT > 0 ? 'burn' : this.vulnT > 0 ? 'holy' : null, G.time);
+    if (this.ward?.visible) this.ward.rotation.y += dt * 0.8;
+    if (this.emergeT > 0) {
+      // Clawing up out of a tunnel.
+      this.emergeT -= dt;
+      const k = Math.max(0, this.emergeT) / 0.6;
+      this.m.group.position.set(this.x, -1.8 * this.scale * k * k, this.z);
+      this.m.group.rotation.y = this.facing;
+      this.m.anim(dt, true, 4, 1);
+      return;
+    }
+    if (this.climbT > 0) {
+      this.climbUpdate(dt);
+      return;
+    }
+    if (this.kx !== 0 || this.kz !== 0) {
+      this.x += this.kx * dt;
+      this.z += this.kz * dt;
+      const f = Math.exp(-9 * dt);
+      this.kx *= f;
+      this.kz *= f;
+      if (Math.abs(this.kx) + Math.abs(this.kz) < 0.05) this.kx = this.kz = 0;
+      this.x = clamp(this.x, MAP.minX, MAP.maxX);
+      if (!this.flying && !d.ethereal) St.pushOut(this, this.r);
+    }
     if (this.stunT > 0) {
       this.stunT -= dt;
       this.m.group.position.set(this.x, this.flyH, this.z);
@@ -512,6 +770,14 @@ export class Enemy implements Target {
     this.swingT += dt / 0.35;
     this.abilities(dt);
     if (!this.alive) return;
+    if (this.slamWind > 0) {
+      // Rearing up for the slam: weapon raised, rooted to the spot.
+      this.swingT = Math.min(this.swingT, 0.33);
+      this.m.group.position.set(this.x, this.flyH, this.z);
+      this.m.anim(dt, false, 0, this.swingT);
+      this.bar.set(this.hp / this.maxHp, this.x, 2.2 * Math.min(this.scale, 2.6) + 0.25 + this.flyH, this.z, true, this.shieldHp / this.shieldMax);
+      return;
+    }
     if (this.retargetT <= 0 || !this.target || !this.target.alive) {
       this.retargetT = 0.3 + Math.random() * 0.15;
       this.pickTarget();
@@ -532,19 +798,43 @@ export class Enemy implements Target {
       } else {
         const seg = St.wallBetween(this.x, this.z, ax, az);
         if (seg && !(d.ranged && surfDist(this.x, this.z, this.r, tgt) <= d.range)) {
-          const gap = !d.noGap && near ? St.nearGap(this.x, 3.5) : null;
-          if (gap !== null) moveTo = [gap, this.z];
-          else tgt = seg;
+          if (d.climber) {
+            // Grappling hook: up and over instead of battering.
+            if (W - this.z < MAP.wallHalf + this.r + 0.4) {
+              this.startClimb(1);
+              return;
+            }
+            moveTo = [this.x, W - MAP.wallHalf - this.r];
+          } else {
+            const gap = !d.noGap && near ? St.nearGap(this.x, 3.5) : null;
+            if (gap !== null) moveTo = [gap, this.z];
+            else tgt = seg;
+          }
         }
+      }
+    } else if (d.climber && !passWalls) {
+      // Heading back out (thieves with their loot): over the wall again.
+      const [ax, az] = aimPoint(this.x, this.z, tgt);
+      if (az < W && St.wallBetween(this.x, this.z, ax, az)) {
+        if (this.z - W < MAP.wallHalf + this.r + 0.4) {
+          this.startClimb(-1);
+          return;
+        }
+        moveTo = [this.x, W + MAP.wallHalf + this.r];
       }
     }
 
     this.moving = false;
     const reach = d.bomb ? 0.4 : d.range;
+    if (d.thief && this.fleeing && this.z < MAP.spawnZ + 2) {
+      this.escape();
+      return;
+    }
     if (moveTo) {
       this.moveToward(moveTo[0], moveTo[1], dt);
     } else if (surfDist(this.x, this.z, this.r, tgt) <= reach) {
-      this.attack(tgt);
+      if (d.thief) this.steal();
+      else this.attack(tgt);
     } else {
       const [ax, az] = aimPoint(this.x, this.z, tgt);
       this.moveToward(ax, az, dt, structId(tgt));
@@ -555,8 +845,80 @@ export class Enemy implements Target {
     this.m.group.rotation.y = this.facing;
     const spd = this.curSpeed();
     this.m.anim(dt, this.moving, spd, this.swingT);
+    if (this.moving && !this.flying && (this.isBoss || this.scale >= 1.8 || d.model === 'mammoth')) {
+      // Heavy footfalls you can hear and feel coming.
+      this.stepT -= dt * Math.max(0.6, spd / 1.6);
+      if (this.stepT <= 0) {
+        this.stepT = 0.62;
+        const sc = d.model === 'mammoth' ? 2.6 : Math.min(2.8, this.scale);
+        Sfx.at('stomp', this.x, this.z, Math.min(1, 0.3 * sc));
+        dust(this.x + (Math.random() - 0.5) * this.r, this.z + (Math.random() - 0.5) * this.r, 0.35 * sc);
+        if (this.isBoss) shakeAt(this.x, this.z, 0.07 * sc, 0.35);
+      }
+    }
     if (this.aura) this.aura.rotation.y += dt * 1.5;
     this.bar.set(this.hp / this.maxHp, this.x, 2.2 * Math.min(this.scale, 2.6) + 0.25 + this.flyH + (this.d.model === 'mammoth' ? 3.5 : 0), this.z, this.isBoss || this.hp < this.maxHp || this.shieldHp > 0, this.shieldHp / this.shieldMax);
+  }
+
+  private startClimb(dir: 1 | -1): void {
+    const seg = St.S.walls[St.segIndex(this.x)];
+    this.climbDur = this.climbT = CLIMB_TIME[this.type] ?? 1.4;
+    this.climbZ0 = this.z;
+    this.climbZ1 = W + dir * (MAP.wallHalf + this.r + 0.3);
+    this.climbH = 2 + (seg?.level ?? 1) * 0.3;
+    this.facing = dir > 0 ? 0 : Math.PI;
+    this.kx = this.kz = 0;
+    Sfx.at('grapple', this.x, this.z, 0.7);
+  }
+
+  private climbUpdate(dt: number): void {
+    this.climbT -= dt;
+    const k = 1 - Math.max(0, this.climbT) / this.climbDur;
+    const up = Math.min(1, k / 0.5);
+    const down = k > 0.68 ? (k - 0.68) / 0.32 : 0;
+    const y = this.climbH * (k < 0.68 ? 1 - (1 - up) * (1 - up) : 1 - down * down);
+    const zf = k < 0.42 ? 0 : k > 0.72 ? 1 : (k - 0.42) / 0.3;
+    this.z = this.climbZ0 + (this.climbZ1 - this.climbZ0) * zf;
+    const g = this.m.group;
+    g.position.set(this.x, y, this.z);
+    g.rotation.y = this.facing;
+    this.m.anim(dt, true, 5, 1);
+    if (this.climbT <= 0) {
+      this.z = this.climbZ1;
+      g.position.y = 0;
+      dust(this.x, this.z, 0.6);
+      this.retargetT = 0;
+    }
+    this.bar.set(this.hp / this.maxHp, this.x, 2.2 * this.scale + 0.25 + y, this.z, this.hp < this.maxHp);
+  }
+
+  /** Thief at the treasury: grab what's there and run. */
+  private steal(): void {
+    if (this.fleeing) return;
+    const cap = 60 + this.wave * 28;
+    let take = Math.min(cap, St.market.pile);
+    St.market.pile -= take;
+    const purse = Math.min(cap - take, Math.floor(G.coins * 0.15));
+    G.coins -= purse;
+    take = Math.round(take + purse);
+    this.loot = take;
+    this.fleeing = true;
+    if (this.goal) this.goal.x = this.x + (Math.random() - 0.5) * 16;
+    this.retargetT = 0;
+    this.speed *= 1.12;
+    burst(this.x, 1.4, this.z, 0xffd23f, 10, { speed: 3, up: 5, size: 0.12 });
+    text(this.x, 2.6, this.z, take > 0 ? `-${take} coins!` : 'Nothing to steal!', 'red', 1.4);
+    Sfx.at('steal', this.x, this.z, 1);
+    emit('threat', { kind: 'stolen', amount: take, e: this });
+  }
+
+  /** A thief made it off the field with the loot. */
+  private escape(): void {
+    this.alive = false;
+    this.removed = true;
+    this.bar.hide();
+    if (this.loot > 0) emit('threat', { kind: 'escaped', amount: this.loot });
+    this.loot = 0;
   }
 
   private curSpeed(): number {
@@ -687,10 +1049,14 @@ export function explode(x: number, z: number, radius: number, dmg: number, who: 
     }
     splashDefenders(x, z, radius, dmg * 0.4);
   } else {
-    for (const e of enemies) if (e.alive && Math.hypot(e.x - x, e.z - z) < radius + e.r) e.damage(dmg, 'splash');
+    for (const e of enemies) {
+      if (!e.alive || Math.hypot(e.x - x, e.z - z) >= radius + e.r) continue;
+      e.damage(dmg, 'splash');
+      e.knock(x, z, 7);
+    }
   }
-  boom(x, 0.4, z, radius);
-  G.shake = Math.min(0.7, G.shake + 0.3);
+  boom(x, 0.4, z, radius, { big: radius >= 2.8 });
+  shakeAt(x, z, 0.3, 0.7);
   Sfx.at('explode', x, z, 1);
 }
 
@@ -1055,7 +1421,7 @@ export function defenders(): Target[] {
 }
 
 function separate(): void {
-  const list = enemies.filter((e) => e.alive);
+  const list = enemies.filter((e) => e.alive && e.climbT <= 0 && e.emergeT <= 0);
   const blockers: Target[] = [hero, ...soldiers, ...rangers];
   for (let i = 0; i < list.length; i++) {
     const a = list[i];

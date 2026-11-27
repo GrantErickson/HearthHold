@@ -13,6 +13,8 @@ import { ABILITIES, blocked, cast } from './abilities';
 import { chestList } from './happenings';
 import { on, emit } from './events';
 import { UI } from './ui';
+import { tunnels } from './threats';
+import type { Enemy } from './units';
 
 /**
  * Developer tools.
@@ -304,6 +306,11 @@ function snapshotRow(w: number, waveSecs: number, bought: string[]): Record<stri
     waveSecs: Math.round(waveSecs),
     minKeep: Math.round(fightStats.minKeep * 100),
     lost: fightStats.lost,
+    tunnels: fightStats.tunnels || undefined,
+    stolen: fightStats.stolen || undefined,
+    escaped: fightStats.escaped || undefined,
+    wards: fightStats.wards || undefined,
+    deaths: fightStats.heroDeaths || undefined,
     keep: `${Math.round(St.S.keep.hp)}/${St.S.keep.maxHp}`,
     keepLv: G.keepLevel,
     lvl: G.level,
@@ -323,27 +330,77 @@ function snapshotRow(w: number, waveSecs: number, bought: string[]): Record<stri
 }
 
 const stuck: Record<string, unknown>[] = [];
-const fightStats = { minKeep: 1, lost: 0 };
+const passive = new URLSearchParams(location.search).has('passive');
+const fightStats = { minKeep: 1, lost: 0, stolen: 0, escaped: 0, wards: 0, heroDeaths: 0, tunnels: 0 };
 on('structureLost', () => fightStats.lost++);
+on('threat', (a) => {
+  const t = a as { kind: string; amount?: number };
+  if (t.kind === 'stolen') fightStats.stolen += t.amount ?? 0;
+  if (t.kind === 'escaped') fightStats.escaped += t.amount ?? 0;
+  if (t.kind === 'ward') fightStats.wards++;
+});
 
-/** Fight a wave with the hero parked behind the centre of the wall, using abilities. */
+/** What needs the hero most: wards only it can break, thieves, enemies inside the walls, a tunnel about to open. */
+function botGoal(t: number): { x: number; z: number } | null {
+  const W = CFG.map.wallZ;
+  let best: Enemy | null = null;
+  let bs = -Infinity;
+  for (const e of enemies) {
+    if (!e.alive || e.flyH > 4 || e.emergeT > 0) continue;
+    let s: number;
+    if (e.wardHits > 0) s = 100 + (e.isBoss ? 50 : 0);
+    else if (e.d.thief) s = 80 + (e.loot > 0 ? 20 : 0);
+    else if (e.z > W + 0.8) s = 60 + (e.d.bomb ? 15 : 0);
+    else if (e.vulnT > 0) s = 55;
+    else continue;
+    s -= Math.hypot(e.x - hero.x, e.z - hero.z) * 0.5;
+    if (s > bs) {
+      bs = s;
+      best = e;
+    }
+  }
+  if (best) return { x: best.x, z: best.z };
+  const tn = tunnels.find((x) => x.state === 'warn');
+  if (tn) return { x: tn.x, z: tn.z + 2 };
+  // Like a player, go out after stragglers once the main push is over.
+  const left = enemies.filter((e) => e.alive);
+  const far = t > 45 && left.length <= 4 && left.length > 0 ? left.find((e) => e.z < W - 3 && e.flyH < 4) : undefined;
+  if (far) return { x: far.x, z: far.z };
+  return null;
+}
+
+/** Walk the hero toward a point at its real speed (no teleporting). */
+function botWalk(x: number, z: number, near: number): void {
+  if (!hero.alive || hero.stunT > 0) return;
+  const dx = x - hero.x;
+  const dz = z - hero.z;
+  const L = Math.hypot(dx, dz);
+  if (L <= near) return;
+  let nx = dx / L;
+  let nz = dz / L;
+  [nx, nz] = St.steer(hero.x, hero.z, nx, nz, hero.r);
+  const step = Math.min(L - near, Stat.heroSpeed() * (hero.slowT > 0 ? 1 - hero.slowAmt : 1) * DT);
+  hero.x += nx * step;
+  hero.z += nz * step;
+  St.pushOut(hero, hero.r);
+}
+
+/** Fight a wave: hold the centre of the wall, run to whatever needs the hero, use abilities. */
 function fight(step: StepFn): number {
   let t = 0;
   fightStats.minKeep = 1;
-  fightStats.lost = 0;
+  fightStats.lost = fightStats.stolen = fightStats.escaped = fightStats.wards = fightStats.heroDeaths = 0;
+  fightStats.tunnels = tunnels.length;
+  let wasAlive = hero.alive;
   while (G.phase === 'wave' && t < 600) {
     fightStats.minKeep = Math.min(fightStats.minKeep, St.S.keep.hp / St.S.keep.maxHp);
+    if (wasAlive && !hero.alive) fightStats.heroDeaths++;
+    wasAlive = hero.alive;
     if (hero.alive) {
-      // Like a player, go out after stragglers once the main push is over.
-      const left = enemies.filter((e) => e.alive);
-      const far = t > 45 && left.length <= 4 && left.length > 0 ? left.find((e) => e.z < CFG.map.wallZ - 3 && e.flyH < 4) : undefined;
-      if (far) {
-        hero.x = far.x + 1.2;
-        hero.z = far.z + 1.2;
-      } else {
-        hero.x = 0;
-        hero.z = CFG.map.wallZ + 1.4;
-      }
+      // ?passive: the old habit of parking behind the wall and letting the defenses work.
+      const goal = passive ? null : botGoal(t);
+      if (goal) botWalk(goal.x, goal.z, 1.4);
+      else botWalk(0, CFG.map.wallZ + 1.4, 0.3);
       for (const a of ABILITIES) if (!blocked(a)) cast(a);
     }
     step(DT);
@@ -421,7 +478,7 @@ export function runAutotest(step: StepFn): void {
     errors.push(e instanceof Error ? `${e.message}\n${e.stack}` : String(e));
   }
   const report = {
-    mode: honest ? 'honest' : 'generous',
+    mode: (honest ? 'honest' : 'generous') + (passive ? ' passive' : ''),
     result: G.phase,
     wavesCleared: G.wavesCleared,
     level: G.level,
