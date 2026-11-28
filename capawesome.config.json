@@ -2,7 +2,7 @@
   "cloud": {
     "apps": [
       {
-        "appId": "YOUR_CAPAWESOME_APP_ID",
+        "appId": "9e724d7a-cc10-4306-bd0b-f481e95f01c9",
         "dependencyInstallCommand": "npm ci",
         "webBuildCommand": "npm run app:sync && npm run version:ci"
       }

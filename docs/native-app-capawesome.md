@@ -13,7 +13,7 @@ the Capacitor project is the whole repository (no `baseDir`).
 | Path | What it is |
 | --- | --- |
 | `capacitor.config.json` | App id `net.micapeak.HearthHold`, home-screen name `HearthHold`, web folder `dist`, full-screen splash and status bar settings |
-| `capawesome.config.json` | What Capawesome runs: `npm ci`, then `npm run app:sync && npm run version:ci` |
+| `capawesome.config.json` | Capawesome app id `9e724d7a-cc10-4306-bd0b-f481e95f01c9`. What Capawesome runs: `npm ci`, then `npm run app:sync && npm run version:ci` |
 | `ios/`, `android/` | The native projects (committed). The bundled web game (`ios/App/App/public`, `android/app/src/main/assets/public`) is not committed; `cap sync` copies it in |
 | `src/native.ts` | In the app only: hides the status bar, keeps the screen on, pauses when the app goes to the background, Android back button (pause / resume, leave from the menu) |
 | `scripts/app-version.mjs` | Writes the version numbers into both projects (below) |
@@ -63,15 +63,14 @@ Never commit a keystore, a certificate or a provisioning profile. These are
 gitignored: `*.keystore`, `*.jks`, `*.p12`, `*.mobileprovision`, `private.pem`.
 Upload them in the Capawesome console; the build injects them.
 
-## 1. Create the app in Capawesome Cloud
+## 1. The app in Capawesome Cloud
 
-In [Capawesome Cloud](https://cloud.capawesome.io/), create an app:
+The app is already in [Capawesome Cloud](https://cloud.capawesome.io/):
 
-- Name: `HearthHold: Ember Siege`
-- App ID / bundle id: `net.micapeak.HearthHold`
-
-Copy the Capawesome app id (a UUID) into `capawesome.config.json` in place of
-`YOUR_CAPAWESOME_APP_ID`, commit and push.
+- Console name: `HearthHold`
+- Bundle id: `net.micapeak.HearthHold`
+- Capawesome app id: `9e724d7a-cc10-4306-bd0b-f481e95f01c9` (in
+  `capawesome.config.json`)
 
 ## 2. Link the repository
 
@@ -113,8 +112,8 @@ Or from a terminal, with a token from the console (don't commit it):
 
 ```sh
 npx @capawesome/cli login --token YOUR_TOKEN
-npx @capawesome/cli apps:builds:create --appId YOUR_CAPAWESOME_APP_ID --platform android
-npx @capawesome/cli apps:builds:create --appId YOUR_CAPAWESOME_APP_ID --platform ios
+npx @capawesome/cli apps:builds:create --appId 9e724d7a-cc10-4306-bd0b-f481e95f01c9 --platform android
+npx @capawesome/cli apps:builds:create --appId 9e724d7a-cc10-4306-bd0b-f481e95f01c9 --platform ios
 ```
 
 Turn on auto-build for `main` in the console if every push should build.
