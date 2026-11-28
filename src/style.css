@@ -432,6 +432,23 @@ h1 {
   text-shadow: 0 4px 0 #8a5a06;
   letter-spacing: 1px;
 }
+h1 .h1-sub {
+  display: block;
+  margin-top: -4px;
+  font-size: 26px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #ff8a3d;
+  text-shadow: 0 3px 0 #8a3006;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
 h2 {
   margin: 6px 0 10px;
   font-size: 32px;
