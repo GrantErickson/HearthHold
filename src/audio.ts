@@ -662,6 +662,12 @@ export const Sfx = {
   unlock(): void {
     ensure();
   },
+  /** Silence everything while the page or app is in the background. */
+  setActive(on: boolean): void {
+    if (!ctx) return;
+    if (on && ctx.state === 'suspended') void ctx.resume();
+    else if (!on && ctx.state === 'running') void ctx.suspend();
+  },
   isMuted(): boolean {
     return muted;
   },
