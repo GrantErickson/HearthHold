@@ -35,7 +35,7 @@ The full design is in [SPEC.md](SPEC.md).
 
 ## Run it
 
-Requires Node 18+.
+Requires Node 24 (see `.nvmrc`).
 
 ```sh
 npm install
@@ -53,6 +53,12 @@ Upload the contents of `dist/` to any static host (GitHub Pages, Netlify,
 Cloudflare Pages, an S3 bucket…). Paths are relative, so it also works from a
 sub-folder. The built page has to be served over http(s); opening
 `dist/index.html` straight from disk won't load the module script.
+
+## iOS and Android
+
+Capawesome Cloud builds the iPhone, iPad, and Android apps from this repository.
+Nothing in that path needs a Mac or Android Studio. The app id, signing, and
+how to start a build are in [docs/native-app-capawesome.md](docs/native-app-capawesome.md).
 
 ## GitHub Pages
 

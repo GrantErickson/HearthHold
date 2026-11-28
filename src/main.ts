@@ -1,3 +1,4 @@
+import '@fontsource/lilita-one/400.css';
 import './style.css';
 import * as THREE from 'three';
 import { scene, camera, engine } from './engine';

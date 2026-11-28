@@ -5,18 +5,47 @@
   "description": "Carry, sell, build and defend: a low-poly medieval wave-defense game for the browser.",
   "homepage": "https://granterickson.github.io/HearthHold/",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cap:sync": "npm run build && cap sync",
+    "cap:copy": "cap copy",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android",
+    "version:ci": "node scripts/store-build-number.mjs --write",
+    "version:get": "capver get",
+    "version:set": "capver set",
+    "version:sync": "capver sync",
+    "version:patch": "capver patch",
+    "version:minor": "capver minor",
+    "version:major": "capver major",
+    "test": "node --test scripts/store-build-number.test.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.3",
+    "@capacitor/core": "^8.6.3",
+    "@capacitor/ios": "^8.6.3",
+    "@fontsource/lilita-one": "^5.3.0",
     "three": "0.170.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.3",
+    "@capawesome/capver": "^0.1.5",
     "@types/three": "0.170.0",
     "typescript": "~5.9.3",
     "vite": "^6.4.6"
+  },
+  "overrides": {
+    "@capawesome/capver": {
+      "minimatch": "3.1.5",
+      "systeminformation": "5.33.26",
+      "zod": "4.6.7",
+      "uuid": "11.1.1"
+    }
   }
 }
