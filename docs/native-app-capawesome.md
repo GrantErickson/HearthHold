@@ -130,7 +130,8 @@ the home screen the app is just **HearthHold** (`appName` in
 `capacitor.config.json`, `CFBundleDisplayName` in `ios/App/App/Info.plist`,
 `app_name` in `android/app/src/main/res/values/strings.xml`), because iOS cuts
 longer names short under the icon. For the privacy questions: HearthHold has no account, no ads, no analytics and no
-network access. It keeps its save on the device and collects nothing. Category:
+network access. It keeps its save on the device and collects nothing. The public privacy policy for the store listing is
+<https://granterickson.github.io/HearthHold/privacy.html>. Category:
 Games / Strategy. It plays in portrait and landscape, with touch controls (drag
 anywhere to move, buttons for the abilities).
 
