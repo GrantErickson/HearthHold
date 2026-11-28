@@ -1,6 +1,6 @@
-# Shipping Hearthold to the App Store and Google Play
+# Shipping HearthHold: Ember Siege to the App Store and Google Play
 
-Hearthold runs as a native iPhone, iPad and Android app through
+HearthHold runs as a native iPhone, iPad and Android app through
 [Capacitor](https://capacitorjs.com/) 8. [Capawesome Cloud](https://cloud.capawesome.io/)
 builds and signs it, so nothing here needs a Mac, Xcode or Android Studio.
 
@@ -12,7 +12,7 @@ the Capacitor project is the whole repository (no `baseDir`).
 
 | Path | What it is |
 | --- | --- |
-| `capacitor.config.json` | App id `net.micapeak.Hearthold`, name `Hearthold`, web folder `dist`, full-screen splash and status bar settings |
+| `capacitor.config.json` | App id `net.micapeak.HearthHold`, home-screen name `HearthHold`, web folder `dist`, full-screen splash and status bar settings |
 | `capawesome.config.json` | What Capawesome runs: `npm ci`, then `npm run app:sync && npm run version:ci` |
 | `ios/`, `android/` | The native projects (committed). The bundled web game (`ios/App/App/public`, `android/app/src/main/assets/public`) is not committed; `cap sync` copies it in |
 | `src/native.ts` | In the app only: hides the status bar, keeps the screen on, pauses when the app goes to the background, Android back button (pause / resume, leave from the menu) |
@@ -67,8 +67,8 @@ Upload them in the Capawesome console; the build injects them.
 
 In [Capawesome Cloud](https://cloud.capawesome.io/), create an app:
 
-- Name: `Hearthold`
-- App ID / bundle id: `net.micapeak.Hearthold`
+- Name: `HearthHold: Ember Siege`
+- App ID / bundle id: `net.micapeak.HearthHold`
 
 Copy the Capawesome app id (a UUID) into `capawesome.config.json` in place of
 `YOUR_CAPAWESOME_APP_ID`, commit and push.
@@ -94,12 +94,12 @@ passwords somewhere safe: a lost keystore can't update the Play listing.
 ## 4. iOS certificate and provisioning profile
 
 1. On [developer.apple.com](https://developer.apple.com/account/resources),
-   Identifiers: register the App ID `net.micapeak.Hearthold`. No capabilities
+   Identifiers: register the App ID `net.micapeak.HearthHold`. No capabilities
    are needed.
 2. Certificate: the Apple Distribution certificate you use for Lumen and
    Sawmill works here too (export it as a `.p12`). Or make a new one with the
    [iOS Certificate Generator](https://capawesome.io/tools/ios-certificate-generator/).
-3. Profiles: an **App Store** provisioning profile for `net.micapeak.Hearthold`
+3. Profiles: an **App Store** provisioning profile for `net.micapeak.HearthHold`
    with that certificate. Download the `.mobileprovision`.
 
 In the console, Signing certificates: iOS, the `.p12` (with its password) and
@@ -124,8 +124,12 @@ Turn on auto-build for `main` in the console if every push should build.
 Download the `.aab` / `.ipa` from the build, or turn on store publishing in the
 console to send builds to Play Console and App Store Connect / TestFlight.
 
-Both stores still need the listing, screenshots and privacy answers. For the
-privacy questions: Hearthold has no account, no ads, no analytics and no
+Both stores still need the listing, screenshots and privacy answers. The store
+name is **HearthHold: Ember Siege** (23 characters; both stores allow 30). On
+the home screen the app is just **HearthHold** (`appName` in
+`capacitor.config.json`, `CFBundleDisplayName` in `ios/App/App/Info.plist`,
+`app_name` in `android/app/src/main/res/values/strings.xml`), because iOS cuts
+longer names short under the icon. For the privacy questions: HearthHold has no account, no ads, no analytics and no
 network access. It keeps its save on the device and collects nothing. Category:
 Games / Strategy. It plays in portrait and landscape, with touch controls (drag
 anywhere to move, buttons for the abilities).

@@ -1,4 +1,4 @@
-package net.micapeak.Hearthold;
+package net.micapeak.HearthHold;
 
 import com.getcapacitor.BridgeActivity;
 

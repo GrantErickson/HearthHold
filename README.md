@@ -63,7 +63,7 @@ push to `main` builds and deploys the site through GitHub Actions.
 
 The same game ships as a native app through Capacitor 8, built and signed by
 Capawesome Cloud (no Mac or Android Studio needed). App id
-`net.micapeak.Hearthold`. The native projects are `ios/` and `android/`;
+`net.micapeak.HearthHold`; the home screen shows "HearthHold". The native projects are `ios/` and `android/`;
 `npm run app:sync` builds the game and copies it in. In the app the status bar
 is hidden, the screen stays on, the game pauses when you switch away, and
 Android's back button pauses. Setup, signing, version numbers and publishing:

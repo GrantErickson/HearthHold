@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <!-- Hearthold app icon: the keep on its hill, in the game's ink-outlined cartoon style. -->
+  <!-- HearthHold app icon: the keep on its hill, in the game's ink-outlined cartoon style. -->
   <defs>
     <radialGradient id="glow" cx="512" cy="430" r="470" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ffe7a0" stop-opacity="1" />

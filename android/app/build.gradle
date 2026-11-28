@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "net.micapeak.Hearthold"
+    namespace = "net.micapeak.HearthHold"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "net.micapeak.Hearthold"
+        applicationId "net.micapeak.HearthHold"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

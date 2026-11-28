@@ -1,6 +1,6 @@
 {
-  "appId": "net.micapeak.Hearthold",
-  "appName": "Hearthold",
+  "appId": "net.micapeak.HearthHold",
+  "appName": "HearthHold",
   "webDir": "dist",
   "backgroundColor": "#1f3a2b",
   "plugins": {
