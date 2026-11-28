@@ -25,11 +25,11 @@ makes no network requests at all. Saves live in the app's own storage.
 
 ## Version numbers
 
-- **The version people see** (1.0.0) is `version` in `package.json`. Bump it,
+- **The version people see** (1.0.1) is `version` in `package.json`. Bump it,
   commit and push before a release build:
 
   ```sh
-  npm version patch --no-git-tag-version   # 1.0.0 → 1.0.1 (or minor / major)
+  npm version patch --no-git-tag-version   # 1.0.1 → 1.0.2 (or minor / major)
   ```
 
 - **The store build number** is Capawesome's `CI_BUILD_NUMBER`, which goes up
