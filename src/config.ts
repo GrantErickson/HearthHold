@@ -231,7 +231,7 @@ export const ACTS: ActDef[] = [
     roster: [['wolf', 1, 61], ['berserker', 1, 61], ['shield', 0.8, 61], ['ram', 0.4, 61], ['skeleton', 1.5, 61], ['wraith', 0.8, 61], ['bat', 1, 61], ['golem', 0.4, 61], ['necro', 0.4, 61], ['archer', 1, 61], ['sapper', 0.6, 61], ['icewolf', 3, 61], ['frostmage', 1.2, 62], ['giant', 0.5, 64], ['scaler', 1.1, 63], ['thief', 0.35, 66]],
   },
   {
-    name: 'The Dark Legion', sub: 'The Dread King marches on Hearthold',
+    name: 'The Dark Legion', sub: 'The Dread King marches on HearthHold',
     roster: [['knight', 2.5, 81], ['drake', 1, 82], ['trebuchet', 0.4, 84], ['icewolf', 1, 81], ['berserker', 1, 81], ['shield', 0.8, 81], ['giant', 0.4, 81], ['golem', 0.4, 81], ['wraith', 0.8, 81], ['necro', 0.4, 81], ['frostmage', 0.6, 81], ['skeleton', 1.5, 81], ['bat', 1, 81], ['sapper', 0.8, 81], ['archer', 1, 81], ['ram', 0.4, 81], ['shaman', 0.5, 81], ['scaler', 1.4, 81], ['thief', 0.45, 81]],
   },
 ];

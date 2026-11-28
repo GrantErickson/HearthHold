@@ -1,4 +1,4 @@
-# Hearthold — Game Spec
+# HearthHold: Ember Siege — Game Spec
 
 A browser game in the "carry, sell, build" style seen in mobile base-builder ads.
 You run around a medieval village, chop and mine resources, drop them at the
@@ -153,7 +153,7 @@ All costs and unlocks live in `src/pads.ts`; stats live in `src/config.ts`.
 | Backpack | 6 levels: 8 → 66 | first sale … Keep 5 |
 | Blacksmith → Sword (10 tiers), Armor (8), Tools (5), Boots (5) | | wave 2, tiers gated by Keep level |
 | **Academy** | Research: Fletching, Masonry, Drill, Commerce, Alchemy, Logistics (5 levels each, +10% per level) | Keep 3 |
-| **Glory of Hearthold** | Repeatable: +2% damage and HP for everything, cost ×1.22 each level | Keep 5 |
+| **Glory of HearthHold** | Repeatable: +2% damage and HP for everything, cost ×1.22 each level | Keep 5 |
 | **Merchant** (temporary) | Two random offers: Perk Scroll, Fury Elixir, Treasure Map, Tome of Wisdom, Ancient Relic | random visits |
 
 Destroyed walls, towers, catapult and special towers leave rubble and a

@@ -295,7 +295,7 @@ export function initSlots(): void {
     'Runic walls, crystal cavern, tower Lv 4',
     'Adamant walls, tower Lv 5, trebuchet',
     'A mighty keep, deeper research',
-    'The Crown of Hearthold',
+    'The Crown of HearthHold',
   ];
   const keepCost = [200, 700, 1800, 4000, 8000, 15000, 26000];
   const keepWave = [3, 8, 13, 24, 38, 55, 72];
@@ -444,14 +444,14 @@ export function initSlots(): void {
   researchSlot('alchemy', -4.6, 27.4, '⚗️', 'Alchemy', [600, 1300, 2600, 4800, 8500], 'Magic towers, catapult and traps +10% damage', 4);
   researchSlot('logistics', 4.6, 27.4, '📦', 'Logistics', [300, 700, 1400, 2800, 5500], 'Workers 12% faster and carry 1 more');
 
-  // Glory of Hearthold: an endless sink for late-game coins.
+  // Glory of HearthHold: an endless sink for late-game coins.
   def({
     id: 'glory',
     group: 'Academy',
     pad: { x: 0, z: 29.8 },
     needs: ['academy'],
     stages: Array.from({ length: 60 }, (_, i): Stage => ({
-      name: `Glory of Hearthold ${i + 1}`,
+      name: `Glory of HearthHold ${i + 1}`,
       icon: '🌟',
       cost: Math.round((3000 * Math.pow(1.22, i)) / 50) * 50,
       req: { keep: 5 },

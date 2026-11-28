@@ -1,4 +1,4 @@
-# Hearthold
+# HearthHold: Ember Siege
 
 Gather, sell, build and hold the keep. A low-poly 3D wave-defense game for the
 browser, in the carry-and-build style of mobile base-builder ads. No ads.
