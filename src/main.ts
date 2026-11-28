@@ -9,7 +9,7 @@ import { Env } from './env';
 import * as St from './structures';
 import { initSlots, reservedRects, makeStaticPad, updatePads, refreshPads, redrawPadText } from './pads';
 import { heroInit, heroUpdate, hero, maxHp } from './hero';
-import { Units, enemies } from './units';
+import { Units, enemies, Sally } from './units';
 import { Proj } from './projectiles';
 import { Waves } from './waves';
 import { updateFX, updateTexts, burst, clearTexts, renderFX, warmFX, fxSampleMaterials, boom, erupt, shatter, warnCircle } from './fx';
@@ -19,6 +19,7 @@ import { Save } from './save';
 import { updateTutorial, type Objective } from './tutorial';
 import { Input } from './input';
 import { Sfx } from './audio';
+import { Music, renderScore } from './music';
 import { on, emit } from './events';
 import { updateAbilities, resetAbilities, type AbilityId } from './abilities';
 import { initHappenings, updateHappenings } from './happenings';
@@ -41,6 +42,8 @@ const focus = new THREE.Vector3(0, 0, 2.5);
 let last = performance.now();
 let zoomWant = 1;
 let zoom = 1;
+/** Phones and tablets sit a little closer, so the hero isn't tiny on a small screen. */
+let closeUp = 1;
 let autoPickT = -1;
 let shakeTime = 0;
 const reducedMotion = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -68,7 +71,7 @@ function updateCamera(dt: number): void {
   const aspect = engine.w / engine.h;
   const base = aspect < 0.7 ? 1.55 : aspect < 1.1 ? 1.25 : 1;
   zoom += (zoomWant - zoom) * Math.min(1, dt * 8);
-  const z = base * zoom;
+  const z = base * zoom * closeUp;
   if (G.phase === 'menu') {
     const a = G.time * 0.06;
     camera.position.set(Math.sin(a) * 30 * base, 24 * base, 4 + Math.cos(a) * 30 * base);
@@ -131,7 +134,16 @@ function frame(now: number): void {
   renderFX();
   Sfx.listener.x = hero.x;
   Sfx.listener.z = hero.z;
-  Sfx.update(rdt, Danger.level, inGame() && !G.paused);
+  Music.update(rdt, {
+    scene: G.phase === 'menu' ? 'title' : G.phase === 'gameover' ? 'defeat' : G.phase === 'victory' ? 'victory' : G.phase === 'wave' ? 'battle' : 'build',
+    danger: Danger.level,
+    boss: Danger.boss,
+    sally: Sally.active,
+    heroDown: !hero.alive,
+    paused: G.paused && inGame(),
+    countdown: G.phase === 'build' && Waves.timerRunning() ? G.buildTimer / Math.max(1, G.speed) : Infinity,
+    act: actOf(G.phase === 'wave' ? G.wave : G.wavesCleared + 1),
+  });
   Post.update(rdt);
   updateTexts(rdt);
   renderThreats();
@@ -221,7 +233,7 @@ function enableDebug(): void {
   debugOn = true;
   initDebugKeys();
   window.addEventListener('error', (e) => UI.toast(`Error: ${e.message}`));
-  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, enemies, Waves, engine, alliesInfo, Proj, Sfx, Danger, tunnels, camps, Camp, cast, fx: { boom, erupt, shatter, warnCircle } };
+  (window as unknown as { HH: unknown }).HH = { G, hero, St, Units, enemies, Waves, engine, alliesInfo, Proj, Sfx, Music, renderScore, Danger, tunnels, camps, Camp, cast, fx: { boom, erupt, shatter, warnCircle } };
 }
 
 /** Test builds: start at a later wave with a base built from a typical run's income. */
@@ -304,6 +316,7 @@ function boot(): void {
     return;
   }
   const touch = matchMedia('(pointer: coarse)').matches;
+  if (touch) closeUp = 0.88;
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, touch ? 1.75 : 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = touch ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;

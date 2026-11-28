@@ -47,6 +47,8 @@ export const Danger = {
   level: 0,
   /** Enemies inside the walls right now. */
   inside: 0,
+  /** A boss is on the field (the music plays its theme). */
+  boss: false,
 };
 
 /** How many tunnel ambushes a wave gets. */
@@ -193,6 +195,7 @@ function updateDanger(dt: number): void {
     if (e.isBoss) boss = true;
   }
   Danger.inside = inside;
+  Danger.boss = boss;
   const wave = G.phase === 'wave';
   const kr = St.S.keep ? St.S.keep.hp / St.S.keep.maxHp : 1;
   let lvl = wave ? 0.2 : 0;

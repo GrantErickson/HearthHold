@@ -17,7 +17,7 @@ no accounts.** Progress is stored only in the player's browser.
 |---|---|
 | Setting | Medieval village |
 | Pressure | Enemy waves on a timer, each bigger than the last |
-| Visuals | Low-poly 3D (Three.js), tilted camera following the hero; day for building, dusk/night for fighting |
+| Visuals | Low-poly 3D (Three.js), tilted camera following the hero (a little closer on touch screens); day for building, dusk/night for fighting |
 | Devices | Desktop (keyboard) and phone (touch joystick + on-screen ability buttons) |
 | Length | 100 waves in 5 acts (≈5× the original 20). Boss every 10 waves, champions every 5. Endless mode afterwards |
 | Losing | Keep destroyed = game over; retry from the start of that wave (auto-save) |
@@ -56,11 +56,26 @@ no accounts.** Progress is stored only in the player's browser.
   status effects tint smoothly instead of swapping whole-model colours.
 - Sound is synthesized with the Web Audio API (no audio files): layered
   effects (transient, body, sub thump, tail) with pitch variation, stereo pan
-  and distance muffling, a shared reverb, a limiter and a voice cap. **War
-  drums** play during waves and build with the danger level (taiko, toms, a low
-  drone, a string ostinato when it's dire); the keep's heartbeat sounds when it
-  is low. No sound is scheduled until a user gesture has started the audio
-  context. Pause menu: Sound on/off, War drums on/off.
+  and distance muffling, a shared reverb, a limiter and a voice cap. The keep's
+  heartbeat sounds when it is low. No sound is scheduled until a user gesture
+  has started the audio context. Pause menu: Sound on/off, Music on/off.
+- **Music** (`src/music.ts`) is synthesized too: pads, Karplus–Strong lute and
+  harp, flute, brass with an opening filter, string ostinato and tremolo, a
+  formant choir, FM bells, taiko, timpani and snare. It is scheduled 0.3 s ahead
+  on the audio clock and built on one theme (A, B, C phrases in the major, a
+  minor version for battle, a Phrygian figure for bosses).
+  - Menu: the theme on flute and harp. Build phase: lute, flute and frame drum;
+    in the last ten seconds of the countdown timpani, a snare roll and a cymbal
+    swell lead into the horn.
+  - Waves switch to battle music on the next beat, in the parallel minor. It
+    opens with the battle theme on brass; drums and bass are always there, and
+    the danger level adds the string ostinato (0.3), brass stabs (0.5), choir
+    (0.7, or 0.4 in Acts III and V), galloping bass and tremolo strings, and
+    raises the tempo from 108 to 128. A sally brings back the theme over a snare
+    march. A boss or champion on the field switches to the boss theme.
+  - A fanfare when a wave is cleared; a hit when a boss or a camp falls; a
+    lament on defeat; a march for the final victory.
+  - Keys by act: D, E, F, B, C. Pausing or losing the hero muffles the music.
 - Save data: `localStorage` key `hearthold-save-v2` (v1 saves from the 20-wave
   version are ignored). Every read/write is wrapped.
 
