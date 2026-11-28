@@ -348,7 +348,7 @@ export const UI = {
     const m = Sfx.isMuted();
     setText(els.muteBtn, m ? '🔇' : '🔊');
     setText(els.btnMute2, m ? 'Sound: off' : 'Sound: on');
-    setText(els.btnMusic, Sfx.musicOn() ? 'War drums: on' : 'War drums: off');
+    setText(els.btnMusic, Sfx.musicOn() ? 'Music: on' : 'Music: off');
   },
 
   refreshSpeed(): void {

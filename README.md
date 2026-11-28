@@ -25,8 +25,11 @@ browser, in the carry-and-build style of mobile base-builder ads. No ads.
 - **Cartoon look and feel**: rounded models, cel shading, ink outlines, bloom,
   squash and stretch, knock-back, hit-stop, big layered explosions with screen
   shockwaves, scorch marks and enemies sent flying.
-- **Synthesized sound**: layered, positional effects with reverb, and war drums
-  that build as the danger grows.
+- **Synthesized sound and music**: layered, positional effects with reverb, and
+  an adaptive score built on the HearthHold theme. A village tune while you
+  build, with drums rising as the countdown runs out; battle music that adds
+  strings, brass and choir as the danger grows; a boss theme; a march when the
+  hero leads a sally; a fanfare for every cleared wave. Each act has its own key.
 - **Many ways to level up**: hero XP with perk choices, four abilities, boss
   relics, equipment, Academy research, keep levels and repeatable Glory.
 - **Game speed** 1× to 3×, day/night, act seasons and weather.
@@ -78,7 +81,7 @@ Android's back button pauses. Setup, signing, version numbers and publishing:
 - **Perks and relics:** L or click the level badge, then 1/2/3.
 - **Game speed:** `[` and `]` or the speed button. **Call wave early:** Space.
 - **Zoom:** mouse wheel. **Pause:** Esc / P · **Mute:** M (the pause menu also
-  toggles the war drums)
+  turns the music on and off)
 
 ## Project layout
 
@@ -100,7 +103,8 @@ Android's back button pauses. Setup, signing, version numbers and publishing:
 | `src/env.ts`                                     | Lighting, day/night, act palettes, seasons and weather                    |
 | `src/models.ts`                                  | Every 3D model, built from primitives in code, and the shared shaders     |
 | `src/fx.ts`                                      | Instanced particles, explosions, telegraph circles, hit-stop, shake, light flashes, health bars, coin drops |
-| `src/audio.ts`                                   | Synthesized sound effects and the procedural war drums                    |
+| `src/audio.ts`                                   | Synthesized sound effects and the mixing desk                             |
+| `src/music.ts`                                   | The adaptive score: themes, sections, synthesized instruments             |
 | `src/happenings.ts`                              | Treasure chests, the travelling merchant, gold rushes                     |
 | `src/waves.ts`, `src/tutorial.ts`, `src/save.ts` | Wave flow, objectives, checkpoint save                                    |
 | `src/ui.ts`, `src/style.css`, `index.html`       | HUD, ability bar, perk picker and menus                                   |

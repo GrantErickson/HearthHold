@@ -1,7 +1,7 @@
 /**
  * Synthesized sound (no audio files): layered effects through a small mixing
- * desk (stereo pan, distance muffling, a shared reverb and a limiter), plus
- * procedural war drums whose intensity follows the danger on the field.
+ * desk (stereo pan, distance muffling, a shared reverb and a limiter). The
+ * music (music.ts) plays through the same desk on its own bus.
  */
 export type SfxName =
   | 'chop' | 'mine' | 'pickup' | 'drop' | 'coin' | 'pay' | 'build' | 'unlock' | 'swing' | 'hit'
@@ -44,7 +44,7 @@ const minGap: Partial<Record<SfxName, number>> = {
 const PRIORITY = new Set<SfxName>(['explode', 'bigexplode', 'horn', 'roar', 'alarm', 'shatter', 'win', 'lose', 'levelup', 'relic', 'act', 'rumble', 'burrow', 'steal', 'slam', 'crit', 'rally']);
 let voiceEnds: number[] = [];
 
-function makeNoise(c: AudioContext, kind: 'white' | 'brown'): AudioBuffer {
+export function makeNoise(c: BaseAudioContext, kind: 'white' | 'brown'): AudioBuffer {
   const len = Math.floor(c.sampleRate * 2.5);
   const b = c.createBuffer(1, len, c.sampleRate);
   const d = b.getChannelData(0);
@@ -61,7 +61,7 @@ function makeNoise(c: AudioContext, kind: 'white' | 'brown'): AudioBuffer {
 }
 
 /** A short, dark hall: decaying stereo noise, low-passed as it fades. */
-function makeImpulse(c: AudioContext): AudioBuffer {
+export function makeImpulse(c: BaseAudioContext): AudioBuffer {
   const len = Math.floor(c.sampleRate * 2.2);
   const b = c.createBuffer(2, len, c.sampleRate);
   for (let ch = 0; ch < 2; ch++) {
@@ -521,93 +521,12 @@ const defs: Record<SfxName, Def> = {
   },
 };
 
-// ───────────────────────────── War drums ─────────────────────────────
+// ───────────────────────────── Music ─────────────────────────────
 
-/** Procedural battle drums: intensity 0 = silence, 1 = all-out. */
-const music = {
-  level: 0,
-  target: 0,
-  next: 0,
-  step: 0,
-  drone: null as { gain: GainNode; oscs: OscillatorNode[] } | null,
-};
-
-function startDrone(c: AudioContext): void {
-  if (music.drone || !musicBus) return;
-  const gain = c.createGain();
-  gain.gain.value = 0;
-  const lp = c.createBiquadFilter();
-  lp.type = 'lowpass';
-  lp.frequency.value = 240;
-  lp.Q.value = 1.2;
-  lp.connect(gain);
-  gain.connect(musicBus);
-  const oscs: OscillatorNode[] = [];
-  for (const f of [55, 55.35, 82.4, 41.2]) {
-    const o = c.createOscillator();
-    o.type = f < 50 ? 'sine' : 'sawtooth';
-    o.frequency.value = f;
-    o.connect(lp);
-    o.start();
-    oscs.push(o);
-  }
-  music.drone = { gain, oscs };
-}
-
-function drum(c: AudioContext, t: number, kind: 'taiko' | 'tom' | 'low' | 'click', vol: number): void {
-  if (!musicBus) return;
-  const V: Voice = { c, t, out: musicBus, p: 1 + (Math.random() - 0.5) * 0.03, end: 0 };
-  if (kind === 'taiko') {
-    tone(V, 82, 0.45, 'sine', 0.55 * vol, { to: 44, attack: 0.004 });
-    noise(V, 0.09, 0.28 * vol, { type: 'lowpass', f: 700, f2: 200 });
-  } else if (kind === 'low') {
-    tone(V, 58, 0.6, 'sine', 0.6 * vol, { to: 34, attack: 0.004 });
-    noise(V, 0.12, 0.2 * vol, { type: 'lowpass', f: 300 });
-  } else if (kind === 'tom') {
-    tone(V, 150, 0.22, 'sine', 0.3 * vol, { to: 95, attack: 0.003 });
-    noise(V, 0.05, 0.14 * vol, { f: 900, q: 1.2 });
-  } else {
-    noise(V, 0.03, 0.12 * vol, { type: 'highpass', f: 3500 });
-  }
-}
-
-/** Low pulsing string line for the tensest moments (A minor). */
-const OSTINATO = [55, 55, 65.4, 55, 82.4, 55, 73.4, 65.4];
-
-function scheduleStep(c: AudioContext, s: number, t: number): void {
-  const L = music.level;
-  if (L < 0.04) return;
-  const i = s % 16;
-  const bar = Math.floor(s / 16);
-  const v = Math.min(1, 0.45 + L * 0.7);
-  if (i === 0 || i === 8) drum(c, t, i === 0 && L > 0.5 ? 'low' : 'taiko', v);
-  if (L > 0.28 && (i === 6 || i === 11 || i === 14)) drum(c, t, 'tom', v * 0.8);
-  if (L > 0.5 && (i === 3 || i === 10)) drum(c, t, 'taiko', v * 0.75);
-  if (L > 0.55 && i % 2 === 0) drum(c, t, 'click', v * 0.5);
-  if (L > 0.72 && bar % 2 === 1 && i >= 12) drum(c, t, 'tom', v * (0.5 + (i - 12) * 0.15));
-  if (L > 0.6 && i % 2 === 0 && musicBus) {
-    const V: Voice = { c, t, out: musicBus, p: 1, end: 0 };
-    tone(V, OSTINATO[(i / 2) % 8] * 2, 0.22, 'sawtooth', 0.05 * (L - 0.45), { lp: 520, q: 2, attack: 0.01 });
-  }
-}
-
-function updateMusic(dt: number, intensity: number, active: boolean): void {
-  const c = ctx;
-  if (!c || c.state !== 'running') return;
-  music.target = active ? intensity : 0;
-  const k = music.target > music.level ? 0.6 : 0.25;
-  music.level += (music.target - music.level) * Math.min(1, dt * k);
-  if (music.level > 0.02) startDrone(c);
-  if (music.drone) music.drone.gain.gain.setTargetAtTime(active ? Math.max(0, music.level - 0.08) * 0.09 : 0, c.currentTime, 0.4);
-  if (!active) return;
-  const bpm = 88 + music.level * 26;
-  const sixteenth = 60 / bpm / 4;
-  if (music.next < c.currentTime) music.next = c.currentTime + 0.05;
-  while (music.next < c.currentTime + 0.18) {
-    scheduleStep(c, music.step, music.next);
-    music.next += sixteenth;
-    music.step++;
-  }
+/** What the score (music.ts) plays through. Null until sound is unlocked, and with sound or music off. */
+export function musicHost(): { ctx: AudioContext; out: AudioNode; verb: AudioNode | null } | null {
+  if (!ctx || !musicBus || muted || !musicOn || ctx.state !== 'running') return null;
+  return { ctx, out: musicBus, verb: reverbIn };
 }
 
 // ───────────────────────────── API ─────────────────────────────
@@ -654,11 +573,6 @@ export const Sfx = {
       wet: d > 14 ? Math.min(0.3, (d - 14) * 0.012) : 0,
     });
   },
-  /** Called every frame: drives the war drums. */
-  update(dt: number, intensity: number, active: boolean): void {
-    if (muted || !musicOn) return;
-    updateMusic(dt, intensity, active);
-  },
   unlock(): void {
     ensure();
   },
@@ -691,6 +605,5 @@ export const Sfx = {
       /* ignore */
     }
     if (musicBus && ctx) musicBus.gain.setTargetAtTime(on ? MUSIC_VOL : 0, ctx.currentTime, 0.1);
-    if (!on && music.drone && ctx) music.drone.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.1);
   },
 };
